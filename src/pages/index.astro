@@ -8,7 +8,7 @@ import { PRECISIONS } from '../lib/units';
 ---
 
 <App title="Unit">
-  <main class="app" data-tab="convert" style="--i: 0; --pos: 0">
+  <main class="app" data-tab="convert" style="--i: 0">
     <div class="tabs" role="tablist">
       <div class="tabs-thumb"></div>
       <button class="tab" role="tab" data-tab="convert" aria-selected="true" aria-controls="screen-convert">
@@ -64,16 +64,14 @@ import { PRECISIONS } from '../lib/units';
   const tabs = document.querySelectorAll<HTMLButtonElement>('.tab');
   const screens = track.querySelectorAll<HTMLElement>('.screen');
   const convLabel = document.querySelector<HTMLElement>('.tab[data-tab="convert"] .tab-label')!;
+  const keysLayer = app.querySelector<HTMLElement>('.keys-layer')!;
+  const keypad = app.querySelector<HTMLElement>('.keypad')!;
   const index = () => Math.max(0, TABS.indexOf(app.dataset.tab!));
-
-  // Where the track is, in screens (fractional mid-swipe). The keypads morph from it.
-  const setPos = (p: number) => app.style.setProperty('--pos', p.toFixed(4));
 
   function setTab(tab: string) {
     const i = Math.max(0, TABS.indexOf(tab));
     app.dataset.tab = TABS[i];
     app.style.setProperty('--i', String(i));
-    setPos(i);
     tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === TABS[i])));
     screens.forEach((s, n) => s.classList.toggle('active', n === i));
     // Only the active screen keeps its section below the fold. Head back up first
@@ -147,13 +145,18 @@ import { PRECISIONS } from '../lib/units';
       viewport.setPointerCapture(e.pointerId);
       app.classList.add('swiping');
     }
+    // Follow the finger directly; CSS takes over again on release.
     const w = viewport.clientWidth;
     const min = -w * (TABS.length - 1);
     let x = -w * index() + dx;
     // Rubber-band past either end.
     if (x > 0) x /= 4;
     if (x < min) x = min + (x - min) / 4;
-    setPos(-x / w);
+    track.style.transform = `translateX(${x}px)`;
+    // The keypad holds still between Convert and Calculate, leaves with the calculator,
+    // and morphs by how far Calculate has come in (--p, used by the .swiping styles).
+    keysLayer.style.transform = `translateX(${Math.min(0, x + w)}px)`;
+    keypad.style.setProperty('--p', String(Math.min(1, Math.max(0, -x / w))));
   });
 
   const endSwipe = (e: PointerEvent) => {
@@ -166,22 +169,24 @@ import { PRECISIONS } from '../lib/units';
     const velocity = dx / Math.max(1, e.timeStamp - s.t);
     const w = viewport.clientWidth;
     app.classList.remove('swiping');
-    suppressNextClick(viewport);
+    track.style.transform = keysLayer.style.transform = '';
+    keypad.style.removeProperty('--p');
+    suppressNextClick(viewport, e);
     const go = Math.abs(dx) > w * 0.25 || Math.abs(velocity) > 0.4;
     const next = index() + (dx < 0 ? 1 : -1);
     if (go && next >= 0 && next < TABS.length) {
       haptic();
       setTab(TABS[next]);
-    } else setPos(index());
+    }
   };
   viewport.addEventListener('pointerup', endSwipe);
   viewport.addEventListener('pointercancel', endSwipe);
 
   initPrecisionSheet();
   // Restore without animating.
-  app.style.transition = 'none';
+  app.classList.add('instant');
   setTab(load<string>('tab', 'convert'));
-  requestAnimationFrame(() => requestAnimationFrame(() => (app.style.transition = '')));
+  requestAnimationFrame(() => requestAnimationFrame(() => app.classList.remove('instant')));
   // Once every screen script has run, refresh so the peek is filled in (and the level starts).
   document.addEventListener('DOMContentLoaded', () => setTab(app.dataset.tab!));
 </script>

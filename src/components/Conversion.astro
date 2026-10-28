@@ -33,7 +33,7 @@ import Icon from './Icon.astro';
   import { FIELDS, type FieldDef, type FieldKey } from '../lib/units';
   import {
     haptic, shared, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel,
-    onLongPress, roundHTML, inchHTML, updateDenoms, onDenom,
+    onLongPress, onTap, roundHTML, inchHTML, updateDenoms, onDenom,
   } from '../lib/ui';
 
   const fieldEls = new Map<FieldKey, HTMLButtonElement>();
@@ -164,9 +164,8 @@ import Icon from './Icon.astro';
   // The keypad is shared with the calculator, whose key names it uses.
   const onConvert = () => document.querySelector('.app')?.getAttribute('data-tab') === 'convert';
   const KEY: Record<string, string> = { '⌫': 'back', AC: 'clear' };
-  document.querySelector('.keypad')!.addEventListener('click', (e) => {
-    const k = (e.target as HTMLElement).closest<HTMLButtonElement>('.key');
-    if (!k || !onConvert() || k.matches('.extra, .off')) return;
+  onTap(document.querySelector('.keypad')!, '.key', (k) => {
+    if (!onConvert() || k.matches('.extra, .off')) return;
     haptic();
     input(KEY[k.dataset.k!] ?? k.dataset.k!);
   });

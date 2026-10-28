@@ -151,27 +151,14 @@ button:focus-visible {
   touch-action: pan-x;
 }
 
-/* Three screens side by side. --pos is where the track is, in screens: the
-   active tab index, or in between while a finger drags it (set by the page script). */
-@property --pos {
-  syntax: '<number>';
-  inherits: true;
-  initial-value: 0;
-}
-
-.app {
-  transition: --pos 0.45s var(--ease);
-}
-
-.app.swiping {
-  transition: none;
-}
-
+/* Three screens side by side; --i is the active tab index (set by the page
+   script, which drives transforms directly while a finger drags). */
 .track {
   display: flex;
   align-items: flex-start;
   width: 300%;
-  transform: translateX(calc(var(--pos) * -100% / 3));
+  transform: translateX(calc(var(--i, 0) * -100% / 3));
+  transition: transform 0.45s var(--ease);
 }
 
 .screen {
@@ -238,10 +225,23 @@ button:focus-visible {
   pointer-events: none;
 }
 
+/* While a finger drags, everything follows it with no easing of its own
+   (the keypad's mid-swipe poses are with the keypad). On load, nothing animates. */
+.app.swiping .track,
+.app.swiping .keys-layer,
+.app.swiping .keypad,
+.app.swiping .keypad .key,
+.app.instant * {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .app,
-  .screen {
-    transition: none;
+  .track,
+  .screen,
+  .keys-layer,
+  .keypad,
+  .keypad .key {
+    transition: none !important;
   }
 }
 
@@ -451,28 +451,16 @@ button:focus-visible {
   opacity: 0.55;
 }
 
-/* The strip covers the operator row, just above the digits; each screen has its
-   own, which fades out as the other screen comes in. The operators hide under
-   the calculator's while it shows. */
+/* The strip covers the operator row, just above the digits. Each screen has its
+   own; only the active one's shows, and none mid-swipe. */
 .keypad .denoms {
   top: calc(var(--key-h) + var(--key-gap));
 }
 
-#conv-denoms.show {
-  opacity: clamp(0, 1 - var(--calc-p) * 4, 1);
-}
-
-#calc-denoms.show {
-  opacity: clamp(0, var(--calc-p) * 4 - 3, 1);
-}
-
 .app:not([data-tab='convert']) #conv-denoms,
-.app:not([data-tab='calc']) #calc-denoms {
-  pointer-events: none;
-}
-
-.app[data-tab='calc'] .keypad:has(#calc-denoms.show) > .key.op {
-  opacity: 0;
+.app:not([data-tab='calc']) #calc-denoms,
+.app.swiping .denoms {
+  visibility: hidden;
 }
 
 /* ---------- Caret (shared) ---------- */
@@ -619,24 +607,19 @@ button:focus-visible {
   height: 100cqh;
   overflow: clip;
   pointer-events: none;
-  translate: calc(max(0, var(--pos) - 1) * -100%) 0;
+  transition: transform 0.45s var(--ease);
 }
 
-/* The calculator has one more row on top and = below. --calc-p (0 on Convert,
-   1 on Calculate and beyond, following the track) morphs between the two: at 0
-   the keypad sits a row lower, so the 4×4 block is Convert's whole keypad, and
-   the extra keys are gone; going to 1 it slides up, = rises in under it and the
-   rows above fade in. */
-@property --calc-p {
-  syntax: '<number>';
-  inherits: true;
-  initial-value: 0;
+.app[data-tab='level'] .keys-layer {
+  transform: translateX(-100%);
 }
 
-.app {
-  --calc-p: clamp(0, var(--pos), 1);
-}
-
+/* Calculate adds a row of units and a row of operators above Convert's 4×4
+   block, and = below. On Convert the keypad sits one row lower, so the block
+   lands exactly where it belongs, and the extra keys are hidden. Going to
+   Calculate the keypad slides up, = rises in under it and the rows above fade
+   in, operators first. Only transform and opacity move, so it all runs off the
+   main thread and the keys answer right away. */
 .keys-layer .keypad {
   --row: calc(var(--key-h) + var(--key-gap));
   position: absolute;
@@ -645,51 +628,105 @@ button:focus-visible {
   bottom: 28px;
   grid-template-rows: repeat(7, var(--key-h));
   pointer-events: auto;
-  transform: translateY(calc((1 - var(--calc-p)) * var(--row)));
+  transition: transform 0.45s var(--ease);
 }
 
-.app:not([data-tab='calc']) .keypad .key.extra {
-  pointer-events: none;
+.app[data-tab='convert'] .keypad {
+  transform: translateY(var(--row));
 }
 
-/* Keys Convert can't use right now; they light up on the way to Calculate. */
-.keypad .key.off {
-  opacity: calc(0.3 + 0.7 * var(--calc-p));
-}
-
-.app[data-tab='convert'] .keypad .key.off {
-  pointer-events: none;
-}
-
-/* `translate`/`scale` rather than `transform`, so the press effect still works;
-   opacity and translate follow --calc-p directly, without their own easing. */
 .keypad .key {
   transition:
     background-color 0.2s ease,
-    transform 0.2s var(--ease);
+    transform 0.2s var(--ease),
+    opacity 0.2s ease;
+}
+
+/* The extra keys keep their press effect on .key's transform, and move on
+   their own via `translate`. --d staggers them in; they leave together. */
+.keypad .key.extra {
+  transition:
+    background-color 0.2s ease,
+    transform 0.2s var(--ease),
+    opacity 0.3s ease var(--d, 0s),
+    translate 0.45s var(--ease) var(--d, 0s);
 }
 
 .keypad .key.eq {
   grid-column: 1 / -1;
-  opacity: clamp(0, var(--calc-p) * 1.6 - 0.4, 1);
-  translate: 0 calc((1 - var(--calc-p)) * 0.6 * var(--row));
-  scale: calc(0.9 + 0.1 * var(--calc-p));
 }
 
-/* Operators fade in first, then the unit row above them. */
-.keypad .key.op {
-  opacity: clamp(0, var(--calc-p) * 1.6 - 0.3, 1);
-  translate: 0 calc((1 - var(--calc-p)) * 10px);
+.app:not([data-tab='convert']) .key.op {
+  --d: 0.05s;
 }
 
-.keypad > .key:nth-child(-n + 4) {
-  opacity: clamp(0, var(--calc-p) * 2 - 1, 1);
-  translate: 0 calc((1 - var(--calc-p)) * 16px);
+.app:not([data-tab='convert']) .key.fn.extra {
+  --d: 0.12s;
+}
+
+.app[data-tab='convert'] .key.extra {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app[data-tab='convert'] .key.eq {
+  translate: 0 calc(0.6 * var(--row));
+}
+
+.app[data-tab='convert'] .key.op {
+  translate: 0 10px;
+}
+
+.app[data-tab='convert'] .key.fn.extra {
+  translate: 0 16px;
+}
+
+/* Keys Convert can't use right now. */
+.app[data-tab='convert'] .key.off {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+/* Mid-swipe the page script sets --p on the keypad: 0 on Convert, 1 once
+   Calculate is fully in. */
+.app.swiping .keypad {
+  transform: translateY(calc((1 - var(--p)) * var(--row)));
+}
+
+.app.swiping .key.eq {
+  opacity: clamp(0, var(--p) * 1.6 - 0.4, 1);
+  translate: 0 calc((1 - var(--p)) * 0.6 * var(--row));
+}
+
+.app.swiping .key.op {
+  opacity: clamp(0, var(--p) * 1.6 - 0.3, 1);
+  translate: 0 calc((1 - var(--p)) * 10px);
+}
+
+.app.swiping .key.fn.extra {
+  opacity: clamp(0, var(--p) * 2 - 1, 1);
+  translate: 0 calc((1 - var(--p)) * 16px);
+}
+
+.app.swiping .key.off {
+  opacity: calc(0.3 + 0.7 * var(--p));
+}
+
+/* The calculator's operators hide under its denominator strip. */
+.app[data-tab='calc'] .keypad:has(#calc-denoms.show) > .key.op {
+  opacity: 0;
 }
 
 /* The ⌃ under = waits until = has settled. */
-.viewport:not(.scrolled) #screen-calc .fold-hint {
-  opacity: clamp(0, var(--calc-p) * 3 - 2, 1);
+#screen-calc .fold-hint {
+  transition:
+    opacity 0.25s ease 0.3s,
+    transform 0.2s var(--ease);
+}
+
+.app:not([data-tab='calc']) #screen-calc .fold-hint {
+  opacity: 0;
+  transition-delay: 0s;
 }
 
 .keypad .key {

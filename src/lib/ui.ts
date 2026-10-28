@@ -146,7 +146,7 @@ function initSheetDrag(sheet: HTMLElement) {
     sheet.style.transition = '';
     sheet.style.transform = '';
     if (dy > sheet.offsetHeight * 0.3 || velocity > 0.5) closePrecisionSheet();
-    suppressNextClick(sheet);
+    suppressNextClick(sheet, e);
   };
   sheet.addEventListener('pointerup', end);
   sheet.addEventListener('pointercancel', end);
@@ -171,16 +171,47 @@ export function updateDenoms(el: HTMLElement, before: string | null) {
 }
 
 export function onDenom(el: HTMLElement, pick: (digits: string[]) => void) {
-  el.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.denom');
-    if (!b || !el.classList.contains('show')) return;
+  onTap(el, '.denom', (b) => {
+    if (!el.classList.contains('show')) return;
     haptic();
     pick([...b.dataset.d!]);
   });
 }
 
-/** Swallow the click that ends a drag, so a key or option isn't triggered by accident. */
-export function suppressNextClick(el: HTMLElement) {
+/**
+ * Taps on `selector` inside `root`, on pointerup rather than click. Phones drop the
+ * click of a tap that comes right after a swipe (it only stops the swipe's fling),
+ * which made the keypad ignore the first key after every screen change. A press
+ * that moved, was taken over by scrolling, or ended in a long press doesn't count;
+ * keyboard activation (a click with no pointer) still does.
+ */
+export function onTap(root: HTMLElement, selector: string, fn: (el: HTMLElement) => void) {
+  const hit = (e: Event) => (e.target as HTMLElement).closest<HTMLElement>(selector);
+  let down: { el: HTMLElement; id: number; x: number; y: number } | null = null;
+  root.addEventListener('pointerdown', (e) => {
+    const el = hit(e);
+    down = el && e.button === 0 ? { el, id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+  });
+  root.addEventListener('pointercancel', () => (down = null));
+  root.addEventListener('pointerup', (e) => {
+    const d = down;
+    down = null;
+    if (!d || e.pointerId !== d.id || hit(e) !== d.el || longPressed.has(d.el)) return;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12 || (d.el as HTMLButtonElement).disabled) return;
+    fn(d.el);
+  });
+  root.addEventListener('click', (e) => {
+    const el = hit(e);
+    if (el && e.detail === 0) fn(el);
+  });
+}
+
+/**
+ * Swallow the click that ends a mouse drag, so a key or option isn't triggered by
+ * accident. A touch drag never ends in a click, so there the next real tap is kept.
+ */
+export function suppressNextClick(el: HTMLElement, e: PointerEvent) {
+  if (e.pointerType !== 'mouse') return;
   const stop = (ev: Event) => {
     ev.stopPropagation();
     ev.preventDefault();
@@ -189,14 +220,19 @@ export function suppressNextClick(el: HTMLElement) {
   setTimeout(() => el.removeEventListener('click', stop, { capture: true }), 80);
 }
 
+/** Elements whose current press turned into a long press (onTap skips them). */
+const longPressed = new WeakSet<HTMLElement>();
+
 /** Long-press support (e.g. hold ⌫ to clear). Returns true from the click handler if a long press fired. */
 export function onLongPress(el: HTMLElement, fn: () => void, ms = 450) {
   let timer = 0;
   let fired = false;
   el.addEventListener('pointerdown', () => {
     fired = false;
+    longPressed.delete(el);
     timer = window.setTimeout(() => {
       fired = true;
+      longPressed.add(el);
       fn();
     }, ms);
   });
