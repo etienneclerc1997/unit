@@ -1,49 +1,42 @@
 ---
 import Icon from './Icon.astro';
-
-const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'], [96, '8′']];
+import FoldHint from './FoldHint.astro';
 ---
 
 <section class="screen" id="screen-level" data-screen="level" aria-label="Level">
-  <div class="lvl-head">
-    <div class="lvl-meta">
-      <span class="lamp"></span>
-      <span id="lvl-mode">Level</span>
-      <span class="lvl-dev" id="lvl-dev"></span>
-    </div>
-    <div class="lvl-actions">
+  <div class="fold-main">
+    <div class="lvl-bar">
       <button class="pill-btn small" id="lvl-zero" aria-label="Calibrate: make this position read level">Zero</button>
       <button class="pill-btn small quiet" id="lvl-reset" aria-label="Clear calibration">Reset</button>
     </div>
+
+    <!-- One face for level, plumb and flat: a readout between two linear vernier
+         dials. Only the text turns to stay upright as the phone rotates. -->
+    <div class="lvl-card" id="lvl-card">
+      <div class="lvl-face-area">
+        <div class="lvl-face" id="lvl-face">
+          <div class="lvl-meta"><span class="lamp"></span><span id="lvl-mode">Level</span></div>
+          <div class="lvl-angle" id="lvl-angle" aria-live="off"></div>
+          <div class="lvl-dev" id="lvl-dev">0.00° off</div>
+        </div>
+      </div>
+      <svg class="dial dial-y" id="dial-y" aria-hidden="true"></svg>
+      <svg class="dial dial-x" id="dial-x" aria-hidden="true"></svg>
+    </div>
+    <FoldHint label="Out over" />
   </div>
 
-  <div class="lvl-dial">
-    <svg id="dial" viewBox="50 8 260 96" aria-hidden="true"></svg>
-    <div class="lvl-angle" id="lvl-angle" aria-live="off"></div>
-    <div class="bullseye" aria-hidden="true">
-      <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
-      <span class="cross h"></span><span class="cross v"></span>
-      <span class="bubble" id="bull-bubble"></span>
-    </div>
-  </div>
-
-  <div class="lvl-offset">
-    <div class="offset-head">
-      <span class="caps">Out over</span>
-      <button class="chip" id="lvl-prec" aria-label="Offset precision">
-        <span class="chip-text">1/64</span>
-        <Icon name="chevron" />
-      </button>
-    </div>
-    <div class="dist-row" role="radiogroup" aria-label="Distance">
-      {DISTANCES.map(([d, label]) => (
-        <button class="dist" role="radio" data-d={d} aria-checked="false">
-          <span class="dist-label">{label}</span>
-          <span class="dist-value">–</span>
+  <div class="fold-more">
+    <div class="lvl-offset">
+      <div class="offset-head">
+        <span class="caps">Out over</span>
+        <button class="chip" id="lvl-prec" aria-label="Offset precision">
+          <span class="chip-text">1/64</span>
+          <Icon name="chevron" />
         </button>
-      ))}
+      </div>
+      <svg id="chart" aria-label="How far out of level a line gets over distance"></svg>
     </div>
-    <svg id="gauge" viewBox="0 0 360 58" aria-hidden="true"></svg>
   </div>
 
   <div class="lvl-gate" id="lvl-gate" hidden>
@@ -54,33 +47,29 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
 
 <script>
   import {
-    GravityFilter, detectMode, read, calibrate, offsetAt, noCalibration,
+    GravityFilter, detectMode, read, calibrate, offsetAt, noCalibration, screenQuarter,
     type Calibration, type LevelMode, type Reading, type Vec3,
   } from '../lib/level';
-  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel, roundHTML } from '../lib/ui';
+  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel } from '../lib/ui';
   import { toFraction, fractionText } from '../lib/units';
   import { Odometer } from '../lib/odometer';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
   const SVG = 'http://www.w3.org/2000/svg';
-  const DEG = 180 / Math.PI;
 
   const screen = $('screen-level');
+  const card = $('lvl-card');
+  const face = $('lvl-face');
   const odometer = new Odometer($('lvl-angle'));
   const modeEl = $('lvl-mode');
   const devEl = $('lvl-dev');
   const gate = $('lvl-gate');
   const gateText = $('lvl-gate-text');
   const enableBtn = $<HTMLButtonElement>('lvl-enable');
-  const bullBubble = $('bull-bubble');
   const precChip = $('lvl-prec');
-  const dists = Array.from(document.querySelectorAll<HTMLButtonElement>('.dist'));
 
   let cal: Calibration = { ...noCalibration(), ...load<Partial<Calibration>>('levelCal', {}) };
-  let distance = load<number>('levelDist', 12);
   let precision = loadPrecision('levelPrec', 64);
-
-  /* ---------- SVG helpers ---------- */
 
   function el(name: string, attrs: Record<string, string | number>, parent: Element, text?: string) {
     const n = document.createElementNS(SVG, name);
@@ -90,90 +79,188 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     return n;
   }
 
-  /* ---------- Circular vernier dial ----------
-     The top arc of a large circle. The main scale (1° per division) turns with
-     the reading; the fixed vernier (10 divisions spanning 9°) reads tenths:
-     the vernier line that lines up with a main line gives the tenth. */
+  const signed = (v: number) => (v < 0 ? `−${-v}` : String(v));
 
-  const R = 560;
-  const CX = 180;
-  const BASE = 58; // y of the shared baseline at the top of the arc
-  const CY = BASE + R;
-  const U = 11 / R; // radians of arc per degree of reading (≈ 11px)
+  /* ---------- Linear vernier dials ----------
+     Main scale: 1° per division, sliding under a fixed orange index. Vernier:
+     10 divisions spanning 9°, so the line that meets a main line gives the tenth. */
 
-  const polar = (r: number, phi: number) => [CX + r * Math.sin(phi), CY - r * Math.cos(phi)];
+  const S = 12; // px per degree
+  const DEPTH_X = 64; // thickness of the bottom strip
+  const DEPTH_Y = 76; // the side strip is wider: its labels sit beside the ticks
 
-  const dial = $('dial') as unknown as SVGSVGElement;
-  const mainScale = el('g', { class: 'main-scale' }, dial);
-  for (let v = -60; v <= 150; v++) {
-    const phi = v * U;
-    const len = v % 10 === 0 ? 18 : v % 5 === 0 ? 13 : 7;
-    const [x1, y1] = polar(R, phi);
-    const [x2, y2] = polar(R + len, phi);
-    el('line', { x1, y1, x2, y2, class: v % 5 === 0 ? 'tk major' : 'tk' }, mainScale);
-    if (v % 5 === 0) {
-      const [tx, ty] = polar(R + 29, phi);
-      const label = v < 0 ? `−${-v}` : String(v);
-      el('text', { x: tx, y: ty, class: 'tl', transform: `rotate(${phi * DEG} ${tx} ${ty})` }, mainScale, label);
+  interface Dial {
+    svg: SVGSVGElement;
+    scale: Element;
+    vernier: Element[];
+    vertical: boolean;
+    value: number | null;
+  }
+
+  function buildDial(svg: SVGSVGElement, vertical: boolean): Dial {
+    // Coordinates: `a` runs along the dial (0 = index), `b` across it.
+    // Horizontal: main ticks above the baseline; vertical: main ticks to its left.
+    const B = vertical ? 42 : 32; // baseline
+    const at = (a: number, b: number) => (vertical ? { x: b, y: -a } : { x: a, y: b });
+    const line = (a1: number, b1: number, a2: number, b2: number, cls: string, parent: Element) => {
+      const p = at(a1, b1);
+      const q = at(a2, b2);
+      return el('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, class: cls }, parent);
+    };
+    const text = (a: number, b: number, cls: string, s: string, parent: Element) => {
+      const p = at(a, b);
+      return el('text', { x: p.x, y: p.y, class: cls }, parent, s);
+    };
+
+    const scale = el('g', {}, svg);
+    for (let v = -90; v <= 90; v++) {
+      const len = v % 10 === 0 ? 17 : v % 5 === 0 ? 12 : 7;
+      line(v * S, B, v * S, B - len, v % 5 === 0 ? 'tk major' : 'tk', scale);
+      if (v % 5 === 0) text(v * S, B - (vertical ? 30 : 25), 'tl', signed(v), scale);
+    }
+    line(-2000, B, 2000, B, 'base', svg);
+    const vernier: Element[] = [];
+    for (let k = 0; k <= 10; k++) {
+      const a = k * 0.9 * S;
+      vernier.push(line(a, B, a, B + (k % 5 === 0 ? 13 : 8), 'vk', svg));
+      if (k === 5 || k === 10) text(a, B + 22, 'vl', k === 5 ? '.5' : '1', svg);
+    }
+    line(0, B - 20, 0, B + 20, 'index', svg);
+    return { svg, scale, vernier, vertical, value: null };
+  }
+
+  const dialX = buildDial($('dial-x') as unknown as SVGSVGElement, false);
+  const dialY = buildDial($('dial-y') as unknown as SVGSVGElement, true);
+
+  function sizeDials() {
+    const w = dialX.svg.clientWidth;
+    const h = dialY.svg.clientHeight;
+    dialX.svg.setAttribute('viewBox', `${-w / 2} 0 ${w} ${DEPTH_X}`);
+    dialY.svg.setAttribute('viewBox', `0 ${-h / 2} ${DEPTH_Y} ${h}`);
+  }
+
+  const DIAL_TAU = 0.18;
+  function setDial(d: Dial, target: number, dt: number) {
+    d.value = d.value === null ? target : d.value + (target - d.value) * (1 - Math.exp(-dt / DIAL_TAU));
+    const v = Math.max(-90, Math.min(90, d.value));
+    d.scale.setAttribute('transform', d.vertical ? `translate(0 ${v * S})` : `translate(${-v * S} 0)`);
+    // The vernier line that meets a main line (1–10; on a whole degree it's the index itself).
+    const k = Math.round((((v % 1) + 1) % 1) * 10);
+    d.vernier.forEach((t, i) => t.classList.toggle('on', i === k && k > 0));
+  }
+
+  /* ---------- Turning text upright ---------- */
+
+  let quarter = 0;
+  let turn = 0; // accumulated degrees, so 270° → 0° turns the short way
+
+  function setQuarter(q: number) {
+    if (q === quarter) return;
+    const delta = ((((q - quarter) * 90 + 540) % 360) - 180) as number;
+    turn += delta;
+    quarter = q;
+    card.style.setProperty('--turn', `${turn}deg`);
+  }
+
+  /* ---------- Out over chart ----------
+     Distance runs down a long line (0 to 8′); how far out of level the line
+     gets is the horizontal bar at 1′, 2′, 4′ and 8′. */
+
+  const chart = $('chart') as unknown as SVGSVGElement;
+  const CH = 300;
+  const DISTS: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'], [96, '8′']];
+  const RANGES = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32, 64];
+  let W = 340;
+  const X0 = 46;
+  const Y0 = 40;
+  const Y1 = CH - 16;
+  const xMax = () => W - 104; // room right of the bars for their values
+  const yAt = (inches: number) => Y0 + (inches / 96) * (Y1 - Y0);
+
+  const axisG = el('g', {}, chart);
+  const rangeG = el('g', {}, chart);
+  const slope = el('line', { class: 'slope' }, chart);
+  const bars = DISTS.map(([d]) => ({
+    d,
+    bar: el('line', { class: 'bar', y1: yAt(d), y2: yAt(d), x1: X0 }, chart),
+    label: el('text', { class: 'bar-val fr', y: yAt(d) }, chart),
+    steps: null as number | null,
+  }));
+
+  function drawAxis() {
+    axisG.replaceChildren();
+    el('line', { x1: X0, y1: Y0, x2: X0, y2: Y1, class: 'axis' }, axisG);
+    for (let f = 0; f <= 8; f++) {
+      const y = yAt(f * 12);
+      const major = [1, 2, 4, 8].includes(f);
+      el('line', { x1: X0 - (major ? 10 : 5), y1: y, x2: X0, y2: y, class: 'tk' }, axisG);
+      if (major) el('text', { x: X0 - 16, y, class: 'dist-l' }, axisG, `${f}′`);
+    }
+    el('line', { x1: X0, y1: Y0, x2: W - 8, y2: Y0, class: 'base' }, axisG);
+  }
+
+  let range = 1 / 4;
+  let shownRange = range;
+  let drawnRange = -1;
+
+  function drawRange() {
+    if (Math.abs(shownRange - drawnRange) < 1e-6) return;
+    drawnRange = shownRange;
+    rangeG.replaceChildren();
+    // Four steps of the current range, labeled as fractions.
+    for (let i = 1; i <= 4; i++) {
+      const v = (range * i) / 4;
+      const x = X0 + (v / shownRange) * (xMax() - X0);
+      if (x > W - 8) continue;
+      el('line', { x1: x, y1: Y0, x2: x, y2: Y0 - (i === 4 ? 8 : 5), class: 'tk' }, rangeG);
+      el('text', { x, y: Y0 - 16, class: 'tl fr' }, rangeG, fractionText(toFraction(v, 64)) + '″');
     }
   }
-  {
-    const edgeY = CY - Math.sqrt(R * R - 200 * 200);
-    el('path', { d: `M ${CX - 200} ${edgeY} A ${R} ${R} 0 0 1 ${CX + 200} ${edgeY}`, class: 'base' }, dial);
+
+  function sizeChart() {
+    W = chart.clientWidth || 340;
+    chart.setAttribute('viewBox', `0 0 ${W} ${CH}`);
+    drawAxis();
+    drawnRange = -1;
   }
 
-  const vernierTicks: Element[] = [];
-  const vernier = el('g', { class: 'vernier' }, dial);
-  for (let k = 0; k <= 10; k++) {
-    const phi = k * 0.9 * U;
-    const len = k % 5 === 0 ? 14 : 9;
-    const [x1, y1] = polar(R, phi);
-    const [x2, y2] = polar(R - len, phi);
-    vernierTicks.push(el('line', { x1, y1, x2, y2, class: 'vk' }, vernier));
-    if (k % 5 === 0 && k > 0) {
-      // Labeled in degrees: the vernier adds .5 or a full 1 to the main reading.
-      const [tx, ty] = polar(R - 24, phi);
-      el('text', { x: tx, y: ty, class: 'vl', transform: `rotate(${phi * DEG} ${tx} ${ty})` }, vernier, k === 5 ? '.5' : '1');
+  /** Lay the chart out for an offset per foot; called every frame with the slow reading. */
+  function layoutChart(dev: number, dt: number) {
+    const per8 = Math.abs(offsetAt(dev, 96));
+    // Pick a range that fits the 8′ bar; shrink only once it's well inside.
+    const fit = RANGES.find((r) => per8 <= r * 0.9) ?? RANGES[RANGES.length - 1];
+    if (fit > range || per8 < range * 0.3) range = fit;
+    shownRange = Math.exp(Math.log(shownRange) + (Math.log(range) - Math.log(shownRange)) * (1 - Math.exp(-dt / 0.35)));
+    drawRange();
+
+    const span = xMax() - X0;
+    const xOf = (inches: number) => X0 + Math.min(1.08, inches / shownRange) * span;
+    for (const b of bars) {
+      const x = xOf(Math.abs(offsetAt(dev, b.d)));
+      b.bar.setAttribute('x2', String(x));
+      b.label.setAttribute('x', String(x + 8));
+    }
+    slope.setAttribute('x1', String(X0));
+    slope.setAttribute('y1', String(Y0));
+    slope.setAttribute('x2', String(xOf(per8)));
+    slope.setAttribute('y2', String(yAt(96)));
+  }
+
+  /** Label text, refreshed on a slow clock with hysteresis. */
+  function labelChart(dev: number, force = false) {
+    for (const b of bars) {
+      const off = Math.abs(offsetAt(dev, b.d));
+      const exact = off * precision;
+      if (!force && b.steps !== null && Math.abs(exact - b.steps) < 0.65) continue;
+      const steps = Math.round(exact);
+      b.steps = steps;
+      const shownInches = steps / precision;
+      const diff = off - shownInches;
+      const dir = steps === 0 || Math.abs(diff) * precision < 0.1 ? 0 : diff > 0 ? 1 : -1;
+      b.label.textContent = fractionText(toFraction(shownInches, precision)) + '″';
+      if (dir) el('tspan', { class: dir > 0 ? 'rd-up' : 'rd-down', dy: -5 }, b.label, dir > 0 ? '+' : '−');
     }
   }
-  {
-    const [x1, y1] = polar(R + 24, 0);
-    const [x2, y2] = polar(R - 30, 0);
-    el('line', { x1, y1, x2, y2, class: 'index' }, dial);
-  }
-
-  /* ---------- Linear vernier gauge for the offset ----------
-     Main scale in 1/16″ slides with the offset (a distance, so 0 and up); the
-     fixed vernier has 4 divisions spanning 3/16″, so it reads to 1/64″. */
-
-  const PX = 192; // px per inch: 12px per 1/16″
-  const GX = 56; // the index sits left of center, leaving room for the scale
-  const GBASE = 30;
-  const gauge = $('gauge') as unknown as SVGSVGElement;
-  const gaugeScale = el('g', { class: 'main-scale' }, gauge);
-  const fracLabel = (sixteenths: number) => {
-    let n = sixteenths;
-    const whole = Math.floor(n / 16);
-    n %= 16;
-    let d = 16;
-    while (n && n % 2 === 0) (n /= 2), (d /= 2);
-    const f = n ? `${n}/${d}` : '';
-    return whole && f ? `${whole} ${f}` : whole ? String(whole) : f || '0';
-  };
-  for (let s = 0; s <= 12 * 16; s++) {
-    const x = GX + (s / 16) * PX;
-    const len = s % 4 === 0 ? 14 : s % 2 === 0 ? 9 : 6;
-    el('line', { x1: x, y1: GBASE, x2: x, y2: GBASE - len, class: s % 4 === 0 ? 'tk major' : 'tk' }, gaugeScale);
-    if (s % 4 === 0) el('text', { x, y: GBASE - 19, class: 'tl fr' }, gaugeScale, fracLabel(s));
-  }
-  el('line', { x1: 0, y1: GBASE, x2: 360, y2: GBASE, class: 'base' }, gauge);
-  const gaugeTicks: Element[] = [];
-  for (let k = 0; k <= 4; k++) {
-    const x = GX + k * 9;
-    gaugeTicks.push(el('line', { x1: x, y1: GBASE, x2: x, y2: GBASE + (k % 4 === 0 ? 13 : 9), class: 'vk' }, gauge));
-  }
-  el('text', { x: GX + 36 + 6, y: GBASE + 12, class: 'vl start fr' }, gauge, '1/64″');
-  el('line', { x1: GX, y1: GBASE - 20, x2: GX, y2: GBASE + 18, class: 'index' }, gauge);
 
   /* ---------- Sensor ---------- */
 
@@ -209,6 +296,10 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     enableBtn.hidden = !withButton;
   }
 
+  type PermissionAPI = { requestPermission?: () => Promise<'granted' | 'denied'> };
+  const needsPermission = () =>
+    typeof (DeviceMotionEvent as unknown as PermissionAPI).requestPermission === 'function';
+
   function listen() {
     if (listening) return;
     listening = true;
@@ -227,11 +318,6 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     window.removeEventListener('devicemotion', onMotion);
     clearTimeout(noDataTimer);
   }
-
-  type PermissionAPI = { requestPermission?: () => Promise<'granted' | 'denied'> };
-
-  const needsPermission = () =>
-    typeof (DeviceMotionEvent as unknown as PermissionAPI).requestPermission === 'function';
 
   function start() {
     if (typeof DeviceMotionEvent === 'undefined') {
@@ -271,83 +357,22 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
   /* ---------- Rendering ---------- */
 
   let wasLevel = false;
-  const DIAL_TAU = 0.18;
-  let dialAngle: number | null = null;
   /** The reading as shown in text: it only moves past a small deadband so digits don't twitch. */
   let shown: Reading | null = null;
   let lastText = 0;
   let lastShownAt = 0;
 
-  /* "Out over" runs on its own, slower clock. The gauge follows a heavier filter
-     (~0.6 s). The numbers show the average over their update window (0.5 s for
-     the selected distance, 1.5 s for the others), with hysteresis so a value
-     sitting between two fractions doesn't flip back and forth. */
+  // "Out over" runs on a slower clock: a heavier filter for the drawing, and
+  // labels that show the average over each second.
   const SLOW_TAU = 0.6;
   let slowDev: number | null = null;
-  /** Running averages of the deviation since each window last refreshed. */
-  const windows = {
-    selected: { ms: 500, sum: 0, n: 0, at: 0 },
-    others: { ms: 1500, sum: 0, n: 0, at: 0 },
-  };
-  /** Displayed value per distance, in steps of 1/precision. */
-  const shownSteps = new Map<number, number>();
-
-  function distHTML(off: number, steps: number) {
-    const shownInches = steps / precision;
-    // The ± mark compares the real offset with the fraction on screen.
-    const diff = off - shownInches;
-    const dir = steps === 0 || Math.abs(diff) * precision < 0.1 ? 0 : diff > 0 ? 1 : -1;
-    return prettyHTML(fractionText(toFraction(shownInches, precision)) + '"') + roundHTML(dir);
-  }
-
-  /** Render distances from a deviation; `which` picks the selected one, the others, or both. */
-  function renderDists(dev: number | null, which: 'selected' | 'others' | 'all', force = false) {
-    if (dev === null) return;
-    dists.forEach((b) => {
-      const d = Number(b.dataset.d);
-      const selected = d === distance;
-      b.setAttribute('aria-checked', String(selected));
-      if ((which === 'selected' && !selected) || (which === 'others' && selected)) return;
-      const off = Math.abs(offsetAt(dev, d));
-      const exact = off * precision;
-      const prev = shownSteps.get(d);
-      // Only move once the value is well past the halfway point to the next step.
-      if (!force && prev !== undefined && Math.abs(exact - prev) < 0.8) return;
-      const steps = Math.round(exact);
-      shownSteps.set(d, steps);
-      b.querySelector('.dist-value')!.innerHTML = distHTML(off, steps);
-    });
-  }
-
-  function resetWindows() {
-    for (const w of Object.values(windows)) (w.sum = 0), (w.n = 0);
-  }
-
   let slowRef = '';
-
-  function updateDists(dev: number, ref: string, dt: number, now: number) {
-    // Snap only when switching level ↔ plumb ↔ flat; any other movement glides.
-    if (slowDev === null || ref !== slowRef) {
-      slowDev = dev;
-      slowRef = ref;
-      resetWindows();
-    } else slowDev += (dev - slowDev) * (1 - Math.exp(-dt / SLOW_TAU));
-
-    for (const [which, w] of Object.entries(windows) as ['selected' | 'others', typeof windows.selected][]) {
-      w.sum += dev;
-      w.n++;
-      if (now - w.at < w.ms) continue;
-      renderDists(w.sum / w.n, which, shownSteps.size === 0);
-      w.at = now;
-      w.sum = 0;
-      w.n = 0;
-    }
-  }
+  const win = { sum: 0, n: 0, at: 0 };
 
   function renderText(r: Reading) {
     odometer.set(r.angle);
     modeEl.textContent = r.mode === 'flat' ? 'Flat' : r.angle > 45 ? 'Plumb' : 'Level';
-    devEl.textContent = r.mode === 'flat' ? '' : `${Math.abs(r.deviation).toFixed(2)}° off`;
+    devEl.textContent = `${Math.abs(r.deviation).toFixed(2)}° off`;
   }
 
   /** Text updates at ~6 Hz, and only when the reading moved past the deadband. */
@@ -364,6 +389,26 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     }
   }
 
+  function updateOutOver(dev: number, ref: string, dt: number, now: number) {
+    // Snap only when switching level ↔ plumb ↔ flat; any other movement glides.
+    if (slowDev === null || ref !== slowRef) {
+      slowDev = dev;
+      slowRef = ref;
+      win.sum = 0;
+      win.n = 0;
+    } else slowDev += (dev - slowDev) * (1 - Math.exp(-dt / SLOW_TAU));
+    layoutChart(slowDev, dt);
+
+    win.sum += dev;
+    win.n++;
+    if (now - win.at >= 1000) {
+      labelChart(win.sum / win.n, bars[0].steps === null);
+      win.at = now;
+      win.sum = 0;
+      win.n = 0;
+    }
+  }
+
   function renderFrame(now: number) {
     frame = requestAnimationFrame(renderFrame);
     if (!raw) return;
@@ -373,34 +418,21 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     mode = detectMode(g, mode);
     const r = read(g, mode, cal);
 
-    // Dial: turn the main scale so the reading sits under the index. A light
-    // extra filter makes it glide; the readout uses the reading itself.
-    dialAngle = dialAngle === null ? r.angle : dialAngle + (r.angle - dialAngle) * (1 - Math.exp(-dt / DIAL_TAU));
-    mainScale.setAttribute('transform', `rotate(${-dialAngle * U * DEG} ${CX} ${CY})`);
-    const tenth = Math.round(((dialAngle % 1) + 1) % 1 * 10) % 10;
-    // On a whole degree the index itself is the match, so nothing else lights up.
-    vernierTicks.forEach((t, k) => t.classList.toggle('on', k === tenth && k > 0));
+    // Text turns to stay upright; while flat there's no "down", so it keeps its last turn.
+    if (r.mode === 'edge') setQuarter(screenQuarter(g, quarter));
 
-    // Offset gauge for the selected distance, on the slower clock. It shows a
-    // distance, so always the magnitude.
+    // The dial that's horizontal in the world shows level/plumb; the other shows lean.
+    // Lying flat, they show tilt across and along the screen.
+    let x: number;
+    let y: number;
+    if (r.mode === 'flat') (x = r.tiltX), (y = r.tiltY);
+    else if (quarter % 2 === 0) (x = r.deviation), (y = r.lean);
+    else (x = r.lean), (y = r.deviation);
+    setDial(dialX, x, dt);
+    setDial(dialY, y, dt);
+
     const ref = r.mode === 'flat' ? 'flat' : r.angle > 45 ? 'plumb' : 'level';
-    updateDists(r.deviation, ref, dt, now);
-    const off = Math.abs(offsetAt(slowDev!, distance));
-    gaugeScale.setAttribute('transform', `translate(${-off * PX} 0)`);
-    const q = Math.round(((((off * 16) % 1) + 1) % 1) * 4) % 4;
-    gaugeTicks.forEach((t, k) => t.classList.toggle('on', k === q && k > 0));
-
-    // Flat: the bubble floats to the high side.
-    screen.dataset.mode = r.mode;
-    if (r.mode === 'flat') {
-      const s = 14; // px per degree
-      let bx = r.tiltX * s;
-      let by = -r.tiltY * s;
-      const m = Math.hypot(bx, by);
-      const max = 56;
-      if (m > max) (bx *= max / m), (by *= max / m);
-      bullBubble.style.transform = `translate(${bx}px, ${by}px)`;
-    }
+    updateOutOver(r.deviation, ref, dt, now);
 
     const isLevel = Math.abs(r.deviation) < 0.05;
     if (isLevel !== wasLevel) {
@@ -416,6 +448,8 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     if (on === active) return;
     active = on;
     if (on) {
+      sizeDials();
+      sizeChart();
       start();
       keepAwake(true);
       lastSample = 0;
@@ -442,16 +476,6 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     save('levelCal', cal);
   });
 
-  dists.forEach((b) =>
-    b.addEventListener('click', () => {
-      haptic();
-      distance = Number(b.dataset.d);
-      save('levelDist', distance);
-      dists.forEach((x) => x.setAttribute('aria-checked', String(x === b)));
-      renderDists(slowDev, 'all', true);
-    }),
-  );
-
   function renderPrec() {
     precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
   }
@@ -461,13 +485,20 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
       precision = p;
       save('levelPrec', p);
       renderPrec();
-      renderDists(slowDev, 'all', true);
+      if (slowDev !== null) labelChart(slowDev, true);
     });
   });
   renderPrec();
   odometer.set(0);
-  dists.forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.d) === distance)));
+  sizeDials();
+  sizeChart();
+  layoutChart(0, 1);
+  labelChart(0, true);
 
+  window.addEventListener('resize', () => {
+    sizeDials();
+    sizeChart();
+  });
   const isLevelTab = () => document.querySelector<HTMLElement>('.app')?.dataset.tab === 'level';
   document.addEventListener('tab:change', () => setActive(isLevelTab()));
   document.addEventListener('visibilitychange', () => {

@@ -136,6 +136,18 @@ import { PRECISIONS } from '../lib/units';
   viewport.addEventListener('pointerup', endSwipe);
   viewport.addEventListener('pointercancel', endSwipe);
 
+  /* ---------- Below the fold ---------- */
+
+  screens.forEach((s) => {
+    const hint = s.querySelector<HTMLElement>('.fold-hint');
+    if (!hint) return;
+    hint.addEventListener('click', () => {
+      haptic();
+      s.scrollTo({ top: s.scrollHeight, behavior: 'smooth' });
+    });
+    s.addEventListener('scroll', () => s.classList.toggle('scrolled', s.scrollTop > 24), { passive: true });
+  });
+
   initPrecisionSheet();
   // Restore without animating.
   track.style.transition = 'none';

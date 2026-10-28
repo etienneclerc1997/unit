@@ -2,6 +2,7 @@
 import Icon from './Icon.astro';
 
 import Denominators from './Denominators.astro';
+import FoldHint from './FoldHint.astro';
 
 // [label, key, style]. The 4×4 block on the left matches the Convert keypad
 // key for key; the top row and the operator column are calculator-only.
@@ -20,6 +21,7 @@ const labels: Record<string, string> = {
 ---
 
 <section class="screen" id="screen-calc" aria-label="Calculator">
+  <div class="fold-main">
   <div class="display" data-fresh="false">
     <div class="display-top">
       <button class="chip" id="calc-prec" aria-label="Answer precision">
@@ -40,7 +42,10 @@ const labels: Record<string, string> = {
     ))}
     <Denominators id="calc-denoms" />
   </div>
+  <FoldHint label="Repeat and split" />
+  </div>
 
+  <div class="fold-more">
   <div class="series" data-mode="repeat">
     <div class="series-bar">
       <button class="mode-toggle" id="mode-toggle" aria-label="Switch between repeat and split">
@@ -56,6 +61,7 @@ const labels: Record<string, string> = {
     <div class="line-scroll h-scroll" id="line-scroll">
       <div class="line" id="line"><div class="ruler"></div></div>
     </div>
+  </div>
   </div>
 </section>
 

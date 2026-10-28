@@ -13,6 +13,7 @@ const keys: [string, string, string][] = [
 ---
 
 <section class="screen" id="screen-convert" aria-label="Conversion">
+  <div class="fold-main">
   <div class="fields">
     {FIELDS.map((f) => (
       <div class="field-wrap">
@@ -46,6 +47,7 @@ const keys: [string, string, string][] = [
         {value === 'back' ? <Icon name="backspace" /> : label}
       </button>
     ))}
+  </div>
   </div>
 </section>
 

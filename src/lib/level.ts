@@ -12,11 +12,12 @@ export interface Vec3 {
 
 export interface Calibration {
   edge: number; // degrees subtracted from the edge reading
+  lean: number; // degrees subtracted from the edge lean
   flatX: number; // degrees subtracted from the flat tilts
   flatY: number;
 }
 
-export const noCalibration = (): Calibration => ({ edge: 0, flatX: 0, flatY: 0 });
+export const noCalibration = (): Calibration => ({ edge: 0, lean: 0, flatX: 0, flatY: 0 });
 
 export interface Reading {
   mode: LevelMode;
@@ -24,7 +25,9 @@ export interface Reading {
   angle: number;
   /** Signed distance from the nearest level/plumb reference, in degrees. */
   deviation: number;
-  /** Flat mode: tilt along the screen's x and y axes, in degrees (bubble position). */
+  /** Edge mode: how far the screen leans toward or away from you, in degrees. */
+  lean: number;
+  /** Flat mode: tilt along the screen's x and y axes, in degrees. */
   tiltX: number;
   tiltY: number;
 }
@@ -70,19 +73,32 @@ export function read(g: Vec3, mode: LevelMode, cal: Calibration): Reading {
     let a = ((((raw + 45) % 180) + 180) % 180) - 45;
     a -= cal.edge;
     const ref = a > 45 ? 90 : 0;
-    return { mode, angle: a, deviation: a - ref, tiltX: 0, tiltY: 0 };
+    const lean = Math.asin(Math.max(-1, Math.min(1, g.z / (Math.hypot(g.x, g.y, g.z) || 1)))) * DEG - cal.lean;
+    return { mode, angle: a, deviation: a - ref, lean, tiltX: 0, tiltY: 0 };
   }
   const tiltX = Math.atan2(g.x, g.z) * DEG - cal.flatX;
   const tiltY = Math.atan2(g.y, g.z) * DEG - cal.flatY;
   const total = Math.atan(Math.hypot(Math.tan(tiltX / DEG), Math.tan(tiltY / DEG))) * DEG;
-  return { mode, angle: total, deviation: total, tiltX, tiltY };
+  return { mode, angle: total, deviation: total, lean: 0, tiltX, tiltY };
 }
 
 /** Make the current position read as level (or plumb). */
 export function calibrate(g: Vec3, mode: LevelMode, cal: Calibration): Calibration {
   const r = read(g, mode, noCalibration());
-  if (mode === 'edge') return { ...cal, edge: r.deviation };
+  if (mode === 'edge') return { ...cal, edge: r.deviation, lean: r.lean };
   return { ...cal, flatX: r.tiltX, flatY: r.tiltY };
+}
+
+/**
+ * Which screen edge points down, in quarter turns counter-clockwise from upright
+ * portrait (0–3), so text can turn to stay readable. Sticky up to 55° from the
+ * current quarter, so it doesn't flip back and forth around 45°.
+ */
+export function screenQuarter(g: Vec3, previous: number): number {
+  const theta = Math.atan2(g.x, g.y) * DEG; // counter-clockwise rotation of the phone
+  const offset = (q: number) => Math.abs(((theta - q * 90 + 540) % 360) - 180);
+  if (offset(previous) < 55) return previous;
+  return (((Math.round(theta / 90) % 4) + 4) % 4);
 }
 
 /** How far a line at `deg` from level drifts over `distance` (same unit back). */
