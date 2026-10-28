@@ -280,12 +280,15 @@ function applyKey(t: string[], key: string): boolean {
     return true;
   }
 
-  if (key === '()') {
-    if (openParens(t) > 0 && endsWithOperand(t)) t.push(')');
-    else {
-      if (endsWithOperand(t)) t.push('×');
-      t.push('(');
-    }
+  if (key === '(') {
+    if (endsWithOperand(t)) t.push('×');
+    t.push('(');
+    return true;
+  }
+
+  if (key === ')') {
+    if (openParens(t) <= 0 || !endsWithOperand(t)) return false;
+    t.push(')');
     return true;
   }
 
@@ -322,7 +325,7 @@ export function press(state: CalcState, key: string): CalcState {
   let tokens = state.tokens;
   let cursor = Math.min(state.cursor, tokens.length);
   // Starting a new number right after "=" replaces the answer.
-  if (state.fresh && (isDigit(key) || key === '.' || key === '(' || key === '()')) {
+  if (state.fresh && (isDigit(key) || key === '.' || key === '(')) {
     tokens = [];
     cursor = 0;
   }

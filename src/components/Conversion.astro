@@ -1,6 +1,7 @@
 ---
 import { FIELDS } from '../lib/units';
 import Icon from './Icon.astro';
+import Denominators from './Denominators.astro';
 
 // [label, value, kind]; kind "frac" keys only work in fraction fields, "ft" only in feet.
 const keys: [string, string, string][] = [
@@ -30,12 +31,14 @@ const keys: [string, string, string][] = [
   </div>
 
   <div class="conv-spacer"></div>
-  <p class="conv-hint" id="conv-hint"></p>
 
+  <!-- Same rows as the calculator keypad; the top row is only used by the denominator strip. -->
   <div class="keypad conv-keys">
+    <div class="keypad-spacer"></div>
+    <Denominators id="conv-denoms" />
     {keys.map(([label, value, kind]) => (
       <button
-        class:list={['key', kind === 'fn' && 'fn', (kind === 'frac' || kind === 'ft') && 'small-label']}
+        class:list={['key', kind === 'fn' && 'fn', (value === ' ' || kind === 'ft') && 'small-label']}
         data-k={value}
         data-kind={kind}
         aria-label={value === 'back' ? 'Delete' : value === ' ' ? 'Space' : value === 'clear' ? 'Clear all' : undefined}
@@ -50,7 +53,7 @@ const keys: [string, string, string][] = [
   import { FIELDS, type FieldDef, type FieldKey } from '../lib/units';
   import {
     haptic, shared, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel,
-    onLongPress, roundHTML, inchHTML,
+    onLongPress, roundHTML, inchHTML, updateDenoms, onDenom,
   } from '../lib/ui';
 
   const fieldEls = new Map<FieldKey, HTMLButtonElement>();
@@ -68,7 +71,7 @@ const keys: [string, string, string][] = [
   let precision = loadPrecision('convPrec');
 
   const precChip = document.getElementById('conv-prec')!;
-  const hint = document.getElementById('conv-hint')!;
+  const denoms = document.getElementById('conv-denoms')!;
 
   /* ---------- Rendering ---------- */
 
@@ -124,7 +127,7 @@ const keys: [string, string, string][] = [
         (kind === 'ft' && (def.key !== 'ftFrac' || (!fresh && state.text.includes("'"))));
     });
 
-    hint.textContent = state.text && state.inches === null ? 'Keep typing…' : '';
+    updateDenoms(denoms, !fresh && state.text.endsWith('/') ? state.text.slice(0, -1) : null);
 
     save('conv', state);
     shared.convPeek = state.inches === null ? '' : inchHTML(state.inches, precision);
@@ -188,6 +191,7 @@ const keys: [string, string, string][] = [
     haptic();
     input('clear');
   });
+  onDenom(denoms, (digits) => digits.forEach(input));
 
   precChip.addEventListener('click', () => {
     haptic();

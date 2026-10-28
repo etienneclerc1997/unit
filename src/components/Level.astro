@@ -1,0 +1,420 @@
+---
+import Icon from './Icon.astro';
+
+const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'], [96, '8′']];
+---
+
+<section class="screen" id="screen-level" data-screen="level" aria-label="Level">
+  <div class="lvl-head">
+    <div class="lvl-read">
+      <div class="lvl-meta">
+        <span class="lamp" id="lvl-lamp"></span>
+        <span id="lvl-mode">Level</span>
+        <span class="lvl-dev" id="lvl-dev"></span>
+      </div>
+      <div class="lvl-angle" id="lvl-angle" aria-live="off"></div>
+    </div>
+    <div class="lvl-actions">
+      <button class="pill-btn" id="lvl-zero" aria-label="Calibrate: make this position read level">Zero</button>
+      <button class="pill-btn quiet" id="lvl-reset" aria-label="Clear calibration">Reset</button>
+    </div>
+  </div>
+
+  <div class="lvl-dial">
+    <svg id="dial" viewBox="36 4 288 104" aria-hidden="true"></svg>
+    <div class="vial-wrap">
+      <div class="vial" id="vial">
+        <span class="vial-mark l"></span><span class="vial-mark r"></span>
+        <span class="bubble" id="vial-bubble"></span>
+      </div>
+      <div class="bullseye" id="bullseye">
+        <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
+        <span class="cross h"></span><span class="cross v"></span>
+        <span class="bubble" id="bull-bubble"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="lvl-offset">
+    <div class="offset-head">
+      <span class="caps">Out over</span>
+      <button class="chip" id="lvl-prec" aria-label="Offset precision">
+        <span class="chip-text">1/64</span>
+        <Icon name="chevron" />
+      </button>
+    </div>
+    <div class="dist-row" role="radiogroup" aria-label="Distance">
+      {DISTANCES.map(([d, label]) => (
+        <button class="dist" role="radio" data-d={d} aria-checked="false">
+          <span class="dist-label">{label}</span>
+          <span class="dist-value">–</span>
+        </button>
+      ))}
+    </div>
+    <svg id="gauge" viewBox="0 0 360 58" aria-hidden="true"></svg>
+  </div>
+
+  <div class="lvl-gate" id="lvl-gate" hidden>
+    <p id="lvl-gate-text"></p>
+    <button class="pill-btn" id="lvl-enable" hidden>Enable level</button>
+  </div>
+</section>
+
+<script>
+  import {
+    GravityFilter, detectMode, read, calibrate, offsetAt, noCalibration,
+    type Calibration, type LevelMode, type Reading, type Vec3,
+  } from '../lib/level';
+  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel, inchHTML } from '../lib/ui';
+
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+  const SVG = 'http://www.w3.org/2000/svg';
+  const DEG = 180 / Math.PI;
+
+  const screen = $('screen-level');
+  const angleEl = $('lvl-angle');
+  const modeEl = $('lvl-mode');
+  const devEl = $('lvl-dev');
+  const gate = $('lvl-gate');
+  const gateText = $('lvl-gate-text');
+  const enableBtn = $<HTMLButtonElement>('lvl-enable');
+  const vial = $('vial');
+  const vialBubble = $('vial-bubble');
+  const bullBubble = $('bull-bubble');
+  const precChip = $('lvl-prec');
+  const dists = Array.from(document.querySelectorAll<HTMLButtonElement>('.dist'));
+
+  let cal: Calibration = { ...noCalibration(), ...load<Partial<Calibration>>('levelCal', {}) };
+  let distance = load<number>('levelDist', 12);
+  let precision = loadPrecision('levelPrec', 64);
+
+  /* ---------- SVG helpers ---------- */
+
+  function el(name: string, attrs: Record<string, string | number>, parent: Element, text?: string) {
+    const n = document.createElementNS(SVG, name);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    parent.append(n);
+    return n;
+  }
+
+  /* ---------- Circular vernier dial ----------
+     The top arc of a large circle. The main scale (1° per division) turns with
+     the reading; the fixed vernier (10 divisions spanning 9°) reads tenths:
+     the vernier line that lines up with a main line gives the tenth. */
+
+  const R = 560;
+  const CX = 180;
+  const BASE = 58; // y of the shared baseline at the top of the arc
+  const CY = BASE + R;
+  const U = 11 / R; // radians of arc per degree of reading (≈ 11px)
+
+  const polar = (r: number, phi: number) => [CX + r * Math.sin(phi), CY - r * Math.cos(phi)];
+
+  const dial = $('dial') as unknown as SVGSVGElement;
+  const mainScale = el('g', { class: 'main-scale' }, dial);
+  for (let v = -60; v <= 150; v++) {
+    const phi = v * U;
+    const len = v % 10 === 0 ? 18 : v % 5 === 0 ? 13 : 7;
+    const [x1, y1] = polar(R, phi);
+    const [x2, y2] = polar(R + len, phi);
+    el('line', { x1, y1, x2, y2, class: v % 5 === 0 ? 'tk major' : 'tk' }, mainScale);
+    if (v % 5 === 0) {
+      const [tx, ty] = polar(R + 29, phi);
+      const label = v < 0 ? `−${-v}` : String(v);
+      el('text', { x: tx, y: ty, class: 'tl', transform: `rotate(${phi * DEG} ${tx} ${ty})` }, mainScale, label);
+    }
+  }
+  {
+    const edgeY = CY - Math.sqrt(R * R - 200 * 200);
+    el('path', { d: `M ${CX - 200} ${edgeY} A ${R} ${R} 0 0 1 ${CX + 200} ${edgeY}`, class: 'base' }, dial);
+  }
+
+  const vernierTicks: Element[] = [];
+  const vernier = el('g', { class: 'vernier' }, dial);
+  for (let k = 0; k <= 10; k++) {
+    const phi = k * 0.9 * U;
+    const len = k % 5 === 0 ? 14 : 9;
+    const [x1, y1] = polar(R, phi);
+    const [x2, y2] = polar(R - len, phi);
+    vernierTicks.push(el('line', { x1, y1, x2, y2, class: 'vk' }, vernier));
+    if (k % 5 === 0 && k > 0) {
+      const [tx, ty] = polar(R - 24, phi);
+      el('text', { x: tx, y: ty, class: 'vl', transform: `rotate(${phi * DEG} ${tx} ${ty})` }, vernier, String(k));
+    }
+  }
+  {
+    const [x1, y1] = polar(R + 24, 0);
+    const [x2, y2] = polar(R - 30, 0);
+    el('line', { x1, y1, x2, y2, class: 'index' }, dial);
+  }
+
+  /* ---------- Linear vernier gauge for the offset ----------
+     Main scale in 1/16″ slides with the offset; the fixed vernier has 4
+     divisions spanning 3/16″, so it reads to 1/64″. */
+
+  const PX = 192; // px per inch: 12px per 1/16″
+  const GBASE = 30;
+  const gauge = $('gauge') as unknown as SVGSVGElement;
+  const gaugeScale = el('g', { class: 'main-scale' }, gauge);
+  const fracLabel = (sixteenths: number) => {
+    const neg = sixteenths < 0;
+    let n = Math.abs(sixteenths);
+    const whole = Math.floor(n / 16);
+    n %= 16;
+    let d = 16;
+    while (n && n % 2 === 0) (n /= 2), (d /= 2);
+    const f = n ? `${n}/${d}` : '';
+    return (neg ? '−' : '') + (whole && f ? `${whole} ${f}` : whole ? String(whole) : f || '0');
+  };
+  for (let s = -12 * 16; s <= 12 * 16; s++) {
+    const x = CX + (s / 16) * PX;
+    const len = s % 4 === 0 ? 14 : s % 2 === 0 ? 9 : 6;
+    el('line', { x1: x, y1: GBASE, x2: x, y2: GBASE - len, class: s % 4 === 0 ? 'tk major' : 'tk' }, gaugeScale);
+    if (s % 4 === 0) el('text', { x, y: GBASE - 19, class: 'tl fr' }, gaugeScale, fracLabel(s));
+  }
+  el('line', { x1: 0, y1: GBASE, x2: 360, y2: GBASE, class: 'base' }, gauge);
+  const gaugeTicks: Element[] = [];
+  for (let k = 0; k <= 4; k++) {
+    const x = CX + k * 9;
+    gaugeTicks.push(el('line', { x1: x, y1: GBASE, x2: x, y2: GBASE + (k % 4 === 0 ? 13 : 9), class: 'vk' }, gauge));
+  }
+  el('text', { x: CX + 36 + 6, y: GBASE + 12, class: 'vl start fr' }, gauge, '1/64″');
+  el('line', { x1: CX, y1: GBASE - 20, x2: CX, y2: GBASE + 18, class: 'index' }, gauge);
+
+  /* ---------- Sensor ---------- */
+
+  // iOS reports accelerationIncludingGravity with the opposite sign to the spec/Android.
+  const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const SIGN = IOS ? -1 : 1;
+
+  const filter = new GravityFilter();
+  let raw: Vec3 | null = null;
+  let lastSample = 0;
+  let mode: LevelMode = 'edge';
+  let listening = false;
+  let active = false;
+  let gotData = false;
+  let frame = 0;
+  let wakeLock: { release(): Promise<void> } | null = null;
+  let noDataTimer = 0;
+
+  function onMotion(e: DeviceMotionEvent) {
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x === null || a.y === null || a.z === null) return;
+    raw = { x: SIGN * a.x, y: SIGN * a.y, z: SIGN * a.z };
+    if (!gotData) {
+      gotData = true;
+      showGate(null);
+    }
+  }
+
+  function showGate(text: string | null, withButton = false) {
+    gate.hidden = text === null;
+    screen.classList.toggle('gated', text !== null);
+    gateText.textContent = text ?? '';
+    enableBtn.hidden = !withButton;
+  }
+
+  function listen() {
+    if (listening) return;
+    listening = true;
+    window.addEventListener('devicemotion', onMotion);
+    clearTimeout(noDataTimer);
+    noDataTimer = window.setTimeout(() => {
+      if (gotData) return;
+      // Silence usually means permission is needed (iOS); otherwise there's no sensor.
+      if (needsPermission()) showGate('The level uses your phone’s motion sensor.', true);
+      else showGate('No motion sensor found. Open this on your phone, over HTTPS.');
+    }, 1200);
+  }
+
+  function stopListening() {
+    listening = false;
+    window.removeEventListener('devicemotion', onMotion);
+    clearTimeout(noDataTimer);
+  }
+
+  type PermissionAPI = { requestPermission?: () => Promise<'granted' | 'denied'> };
+
+  const needsPermission = () =>
+    typeof (DeviceMotionEvent as unknown as PermissionAPI).requestPermission === 'function';
+
+  function start() {
+    if (typeof DeviceMotionEvent === 'undefined') {
+      showGate('This browser has no access to motion sensors.');
+      return;
+    }
+    listen();
+  }
+
+  enableBtn.addEventListener('click', async () => {
+    haptic();
+    try {
+      const res = await (DeviceMotionEvent as unknown as PermissionAPI).requestPermission!();
+      if (res === 'granted') {
+        showGate(null);
+        stopListening();
+        listen();
+      } else showGate('Motion access was denied. Allow it in Settings › Safari › Motion & Orientation Access.');
+    } catch {
+      showGate('Motion access is not available here.');
+    }
+  });
+
+  async function keepAwake(on: boolean) {
+    try {
+      if (on && !wakeLock && 'wakeLock' in navigator) {
+        wakeLock = await (navigator as unknown as { wakeLock: { request(t: string): Promise<{ release(): Promise<void> }> } }).wakeLock.request('screen');
+      } else if (!on && wakeLock) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+    } catch {
+      wakeLock = null;
+    }
+  }
+
+  /* ---------- Rendering ---------- */
+
+  let lastText = 0;
+  let wasLevel = false;
+  let reading: Reading | null = null;
+
+  function angleHTML(v: number): string {
+    const sign = v < -0.005 ? '−' : '';
+    const [int, dec] = Math.abs(v).toFixed(2).split('.');
+    const padded = int.padStart(3, '0');
+    const lead = padded.length - int.length;
+    return (
+      `<span class="sign">${sign}</span>` +
+      `<span class="lead">${padded.slice(0, lead)}</span>${int}.${dec[0]}<span class="hund">${dec[1]}</span><span class="deg">°</span>`
+    );
+  }
+
+  function renderText(r: Reading) {
+    angleEl.innerHTML = angleHTML(r.angle);
+    const ref = r.mode === 'flat' ? 'Flat' : r.angle > 45 ? 'Plumb' : 'Level';
+    modeEl.textContent = ref;
+    devEl.textContent = r.mode === 'flat' ? '' : `${Math.abs(r.deviation).toFixed(2)}° off`;
+    dists.forEach((b) => {
+      const d = Number(b.dataset.d);
+      // Anything that rounds to zero reads as exactly zero (no ± mark from sensor noise).
+      const off = Math.abs(offsetAt(r.deviation, d));
+      b.querySelector('.dist-value')!.innerHTML = inchHTML(Math.round(off * precision) === 0 ? 0 : off, precision);
+      b.setAttribute('aria-checked', String(d === distance));
+    });
+  }
+
+  function renderFrame(now: number) {
+    frame = requestAnimationFrame(renderFrame);
+    if (!raw) return;
+    const g = filter.push(raw, (now - (lastSample || now)) / 1000);
+    lastSample = now;
+    mode = detectMode(g, mode);
+    const r = (reading = read(g, mode, cal));
+
+    // Dial: turn the main scale so the reading sits under the index.
+    mainScale.setAttribute('transform', `rotate(${-r.angle * U * DEG} ${CX} ${CY})`);
+    const tenth = Math.round(((r.angle % 1) + 1) % 1 * 10) % 10;
+    // On a whole degree the index itself is the match, so nothing else lights up.
+    vernierTicks.forEach((t, k) => t.classList.toggle('on', k === tenth && k > 0));
+
+    // Offset gauge for the selected distance.
+    const off = offsetAt(r.deviation, distance);
+    gaugeScale.setAttribute('transform', `translate(${-off * PX} 0)`);
+    const q = Math.round(((((off * 16) % 1) + 1) % 1) * 4) % 4;
+    gaugeTicks.forEach((t, k) => t.classList.toggle('on', k === q && k > 0));
+
+    // Vials: the bubble floats to the high side.
+    screen.dataset.mode = r.mode;
+    if (r.mode === 'edge') {
+      vial.classList.toggle('plumb', r.angle > 45);
+      const x = Math.max(-1, Math.min(1, r.deviation / 4));
+      vialBubble.style.transform = `translateX(${x * 92}px)`;
+    } else {
+      const s = 14; // px per degree
+      let bx = r.tiltX * s;
+      let by = -r.tiltY * s;
+      const m = Math.hypot(bx, by);
+      const max = 56;
+      if (m > max) (bx *= max / m), (by *= max / m);
+      bullBubble.style.transform = `translate(${bx}px, ${by}px)`;
+    }
+
+    const isLevel = Math.abs(r.deviation) < 0.05;
+    if (isLevel !== wasLevel) {
+      screen.classList.toggle('is-level', isLevel);
+      if (isLevel) haptic();
+      wasLevel = isLevel;
+    }
+
+    // Numbers settle at ~8 Hz so they're readable.
+    if (now - lastText > 120) {
+      lastText = now;
+      renderText(r);
+    }
+  }
+
+  function setActive(on: boolean) {
+    if (on === active) return;
+    active = on;
+    if (on) {
+      start();
+      keepAwake(true);
+      lastSample = 0;
+      frame = requestAnimationFrame(renderFrame);
+    } else {
+      stopListening();
+      keepAwake(false);
+      cancelAnimationFrame(frame);
+    }
+  }
+
+  /* ---------- Controls ---------- */
+
+  $('lvl-zero').addEventListener('click', () => {
+    if (!filter.value) return;
+    haptic();
+    cal = calibrate(filter.value, mode, cal);
+    save('levelCal', cal);
+  });
+
+  $('lvl-reset').addEventListener('click', () => {
+    haptic();
+    cal = noCalibration();
+    save('levelCal', cal);
+  });
+
+  dists.forEach((b) =>
+    b.addEventListener('click', () => {
+      haptic();
+      distance = Number(b.dataset.d);
+      save('levelDist', distance);
+      if (reading) renderText(reading);
+    }),
+  );
+
+  function renderPrec() {
+    precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
+  }
+  precChip.addEventListener('click', () => {
+    haptic();
+    openPrecisionSheet(precision, (p) => {
+      precision = p;
+      save('levelPrec', p);
+      renderPrec();
+      if (reading) renderText(reading);
+    });
+  });
+  renderPrec();
+  angleEl.innerHTML = angleHTML(0);
+  dists.forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.d) === distance)));
+
+  const isLevelTab = () => document.querySelector<HTMLElement>('.app')?.dataset.tab === 'level';
+  document.addEventListener('tab:change', () => setActive(isLevelTab()));
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) setActive(false);
+    else setActive(isLevelTab());
+  });
+</script>

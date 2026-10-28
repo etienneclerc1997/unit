@@ -11,14 +11,11 @@ export function prettyHTML(text: string): string {
     .replace(/(\d+)\/(\d+)/g, '<span class="fr">$1/$2</span>');
 }
 
-/** Small arrow after a rounded value: up = the real value is a bit larger, down = a bit smaller. */
+/** Small mark after a rounded value: + = the real value is a bit larger, − = a bit smaller. */
 export function roundHTML(dir: RoundDir): string {
   if (dir === 0) return '';
   const up = dir > 0;
-  return (
-    `<span class="rd ${up ? 'up' : 'down'}" role="img" aria-label="${up ? 'slightly more' : 'slightly less'}">` +
-    `<svg viewBox="0 0 10 10" aria-hidden="true"><path d="${up ? 'M5 1.5 9 8H1z' : 'M5 8.5 9 2H1z'}"/></svg></span>`
-  );
+  return `<span class="rd ${up ? 'up' : 'down'}" role="img" aria-label="${up ? 'slightly more' : 'slightly less'}">${up ? '+' : '−'}</span>`;
 }
 
 /** Inch value → HTML fraction, marked when it had to be rounded. */
@@ -65,9 +62,9 @@ export function save(name: string, value: unknown) {
   }
 }
 
-export function loadPrecision(name: string): Precision {
-  const p = load<number>(name, DEFAULT_PRECISION);
-  return (PRECISIONS as readonly number[]).includes(p) ? (p as Precision) : DEFAULT_PRECISION;
+export function loadPrecision(name: string, fallback: Precision = DEFAULT_PRECISION): Precision {
+  const p = load<number>(name, fallback);
+  return (PRECISIONS as readonly number[]).includes(p) ? (p as Precision) : fallback;
 }
 
 /* ---------- Precision sheet ---------- */
@@ -153,6 +150,33 @@ function initSheetDrag(sheet: HTMLElement) {
   };
   sheet.addEventListener('pointerup', end);
   sheet.addEventListener('pointercancel', end);
+}
+
+/* ---------- Denominator strip ---------- */
+
+/**
+ * Show the strip when the text being typed ends with "/". `before` is everything
+ * before the slash; denominators that can't make a proper fraction are dimmed.
+ */
+export function updateDenoms(el: HTMLElement, before: string | null) {
+  const show = before !== null;
+  el.classList.toggle('show', show);
+  el.setAttribute('aria-hidden', String(!show));
+  if (!show) return;
+  const numerator = Number(before.match(/(\d+)$/)?.[1] ?? 0);
+  el.querySelectorAll<HTMLButtonElement>('.denom').forEach((b) => {
+    b.disabled = Number(b.dataset.d) <= numerator;
+    b.tabIndex = show ? 0 : -1;
+  });
+}
+
+export function onDenom(el: HTMLElement, pick: (digits: string[]) => void) {
+  el.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.denom');
+    if (!b || !el.classList.contains('show')) return;
+    haptic();
+    pick([...b.dataset.d!]);
+  });
 }
 
 /** Swallow the click that ends a drag, so a key or option isn't triggered by accident. */

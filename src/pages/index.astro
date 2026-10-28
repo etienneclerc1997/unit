@@ -2,18 +2,22 @@
 import App from '../layouts/App.astro';
 import Conversion from '../components/Conversion.astro';
 import Calculator from '../components/Calculator.astro';
+import Level from '../components/Level.astro';
 import { PRECISIONS } from '../lib/units';
 ---
 
 <App title="Unit">
-  <main class="app" data-tab="convert">
+  <main class="app" data-tab="convert" style="--i: 0">
     <div class="tabs" role="tablist">
       <div class="tabs-thumb"></div>
       <button class="tab" role="tab" data-tab="convert" aria-selected="true" aria-controls="screen-convert">
-        <span class="orb orb-sm orb-sunset"></span><span class="tab-label">Convert</span>
+        <span class="tab-label">Convert</span>
       </button>
       <button class="tab" role="tab" data-tab="calc" aria-selected="false" aria-controls="screen-calc">
-        <span class="orb orb-sm orb-lagoon"></span><span class="tab-label">Calculate</span>
+        <span class="tab-label">Calculate</span>
+      </button>
+      <button class="tab" role="tab" data-tab="level" aria-selected="false" aria-controls="screen-level">
+        <span class="tab-label">Level</span>
       </button>
     </div>
 
@@ -21,6 +25,7 @@ import { PRECISIONS } from '../lib/units';
       <div class="track">
         <Conversion />
         <Calculator />
+        <Level />
       </div>
     </div>
   </main>
@@ -30,9 +35,8 @@ import { PRECISIONS } from '../lib/units';
     <div class="sheet-grip-area"><div class="sheet-grip"></div></div>
     <h2 id="sheet-title">Precision</h2>
     <p>
-      Fractions round to the nearest step and show in their simplest form. An arrow means the real value is a
-      little larger <span class="rd up"><svg viewBox="0 0 10 10"><path d="M5 1.5 9 8H1z" /></svg></span> or
-      smaller <span class="rd down"><svg viewBox="0 0 10 10"><path d="M5 8.5 9 2H1z" /></svg></span>
+      Fractions round to the nearest step and show in their simplest form. A <span class="rd up">+</span> means
+      the real value is a little larger, a <span class="rd down">−</span> a little smaller.
     </p>
     <div class="prec-grid" role="radiogroup">
       {PRECISIONS.map((p) => (
@@ -47,19 +51,25 @@ import { PRECISIONS } from '../lib/units';
 <script>
   import { haptic, shared, load, save, initPrecisionSheet, suppressNextClick } from '../lib/ui';
 
+  const TABS = ['convert', 'calc', 'level'];
   const app = document.querySelector<HTMLElement>('.app')!;
   const track = app.querySelector<HTMLElement>('.track')!;
   const viewport = app.querySelector<HTMLElement>('.viewport')!;
   const tabs = document.querySelectorAll<HTMLButtonElement>('.tab');
+  const screens = track.querySelectorAll<HTMLElement>('.screen');
   const convLabel = document.querySelector<HTMLElement>('.tab[data-tab="convert"] .tab-label')!;
+  const index = () => Math.max(0, TABS.indexOf(app.dataset.tab!));
 
   function setTab(tab: string) {
-    app.dataset.tab = tab;
-    tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === tab)));
-    // While calculating, the Convert tab shows the last converted value as a peek.
-    convLabel.innerHTML = tab === 'calc' && shared.convPeek ? shared.convPeek : 'Convert';
-    save('tab', tab);
-    document.dispatchEvent(new CustomEvent('tab:change', { detail: tab }));
+    const i = Math.max(0, TABS.indexOf(tab));
+    app.dataset.tab = TABS[i];
+    app.style.setProperty('--i', String(i));
+    tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === TABS[i])));
+    screens.forEach((s, n) => s.classList.toggle('active', n === i));
+    // Away from Convert, its tab peeks at the last converted value.
+    convLabel.innerHTML = i > 0 && shared.convPeek ? shared.convPeek : 'Convert';
+    save('tab', TABS[i]);
+    document.dispatchEvent(new CustomEvent('tab:change', { detail: TABS[i] }));
   }
 
   tabs.forEach((t) =>
@@ -95,11 +105,11 @@ import { PRECISIONS } from '../lib/units';
       app.classList.add('swiping');
     }
     const w = viewport.clientWidth;
-    const base = app.dataset.tab === 'calc' ? -w : 0;
-    let x = base + dx;
-    // Rubber-band past either edge.
+    const min = -w * (TABS.length - 1);
+    let x = -w * index() + dx;
+    // Rubber-band past either end.
     if (x > 0) x /= 4;
-    if (x < -w) x = -w + (x + w) / 4;
+    if (x < min) x = min + (x - min) / 4;
     track.style.transform = `translateX(${x}px)`;
   });
 
@@ -117,10 +127,10 @@ import { PRECISIONS } from '../lib/units';
     app.classList.remove('swiping');
     suppressNextClick(viewport);
     const go = Math.abs(dx) > w * 0.25 || Math.abs(velocity) > 0.4;
-    const next = dx < 0 ? 'calc' : 'convert';
-    if (go && next !== app.dataset.tab) {
+    const next = index() + (dx < 0 ? 1 : -1);
+    if (go && next >= 0 && next < TABS.length) {
       haptic();
-      setTab(next);
+      setTab(TABS[next]);
     }
   };
   viewport.addEventListener('pointerup', endSwipe);
@@ -129,8 +139,8 @@ import { PRECISIONS } from '../lib/units';
   initPrecisionSheet();
   // Restore without animating.
   track.style.transition = 'none';
-  setTab(load<string>('tab', 'convert') === 'calc' ? 'calc' : 'convert');
+  setTab(load<string>('tab', 'convert'));
   requestAnimationFrame(() => requestAnimationFrame(() => (track.style.transition = '')));
-  // Once every screen script has run, refresh so the peek is filled in.
+  // Once every screen script has run, refresh so the peek is filled in (and the level starts).
   document.addEventListener('DOMContentLoaded', () => setTab(app.dataset.tab!));
 </script>

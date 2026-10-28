@@ -1,5 +1,6 @@
 /* Neutral canvas from DESIGN-elevenlabs.md; color is reserved for function:
-   units (violet), repeat (blue), split (orange), rounding arrows (orange ▲ / blue ▼). */
+   orange is the main accent (=, caret, focus, selection) and marks split;
+   blue marks repeat; rounding marks are orange + / blue −. */
 :root {
   --ink: #0c0a09;
   --primary: #1c1917;
@@ -16,11 +17,10 @@
   --blue: #1f5fff;
   --blue-soft: #e9efff;
   --orange: #ff5417;
+  --orange-press: #e8440a;
   --orange-soft: #fff0e9;
-  --violet: #6236f0;
-  --violet-soft: #f0ebff;
-  --violet-press: #e3dbff;
 
+  --accent: var(--orange);
   --up: var(--orange);
   --down: var(--blue);
 
@@ -34,22 +34,7 @@
 
   --font: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
-  /* Film grain, blended over gradients. */
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-
-  --orb-sunset:
-    radial-gradient(circle at 30% 22%, #ffd0a6 0%, transparent 46%),
-    radial-gradient(circle at 78% 86%, #b5200a 0%, transparent 58%),
-    radial-gradient(circle at 50% 50%, #ff7a36, #f2471a);
-  --orb-ocean:
-    radial-gradient(circle at 72% 22%, #d2f6ff 0%, transparent 44%),
-    radial-gradient(circle at 22% 84%, #0832c9 0%, transparent 60%),
-    radial-gradient(circle at 50% 50%, #4a92ff, #1f5ff0);
-  --orb-lagoon:
-    radial-gradient(circle at 32% 24%, #c4e89a 0%, transparent 46%),
-    radial-gradient(circle at 84% 46%, #dcfbff 0%, transparent 40%),
-    radial-gradient(circle at 62% 92%, #2a86f5 0%, transparent 58%),
-    radial-gradient(circle at 50% 50%, #6db25f, #4c9a53);
+  --key-gap: 8px;
 }
 
 *,
@@ -102,20 +87,16 @@ button:focus-visible {
   font-variant-numeric: diagonal-fractions;
 }
 
-/* Rounding arrow: the real value is a little larger (up) or smaller (down). */
+/* Rounding mark, raised like an exponent: the real value is a little larger (+) or smaller (−). */
 .rd {
-  display: inline-flex;
-  align-self: center;
-  width: 0.42em;
-  min-width: 7px;
-  margin-left: 0.22em;
-  vertical-align: 0.12em;
-}
-
-.rd svg {
-  width: 100%;
-  height: auto;
-  fill: currentColor;
+  position: relative;
+  top: -0.5em;
+  display: inline-block;
+  margin-left: 0.1em;
+  font-size: 0.62em;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .rd.up {
@@ -124,52 +105,6 @@ button:focus-visible {
 
 .rd.down {
   color: var(--down);
-}
-
-/* ---------- Grainy gradient orbs ---------- */
-
-.orb {
-  position: relative;
-  display: inline-block;
-  flex-shrink: 0;
-  border-radius: 50%;
-  overflow: hidden;
-  isolation: isolate;
-}
-
-.orb::after,
-.grain::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--grain);
-  background-size: 140px;
-  mix-blend-mode: overlay;
-  opacity: 0.55;
-  pointer-events: none;
-  border-radius: inherit;
-}
-
-.orb-sm {
-  width: 12px;
-  height: 12px;
-}
-
-.orb-xs {
-  width: 14px;
-  height: 14px;
-}
-
-.orb-sunset {
-  background: var(--orb-sunset);
-}
-
-.orb-ocean {
-  background: var(--orb-ocean);
-}
-
-.orb-lagoon {
-  background: var(--orb-lagoon);
 }
 
 /* ---------- App shell ---------- */
@@ -203,19 +138,18 @@ button:focus-visible {
   touch-action: pan-x;
 }
 
+/* Three screens side by side; --i is the active tab index (set by the page script). */
 .track {
   display: flex;
-  width: 200%;
+  width: 300%;
   height: 100%;
+  transform: translateX(calc(var(--i, 0) * -100% / 3));
   transition: transform 0.45s var(--ease);
 }
 
-.app[data-tab='calc'] .track {
-  transform: translateX(-50%);
-}
-
 .screen {
-  width: 50%;
+  position: relative;
+  width: calc(100% / 3);
   height: 100%;
   padding: 16px 16px 0;
   display: flex;
@@ -225,8 +159,7 @@ button:focus-visible {
   transition: opacity 0.3s ease;
 }
 
-.app:not(.swiping)[data-tab='calc'] #screen-convert,
-.app:not(.swiping)[data-tab='convert'] #screen-calc {
+.app:not(.swiping) .screen:not(.active) {
   opacity: 0;
   pointer-events: none;
 }
@@ -243,7 +176,7 @@ button:focus-visible {
 .tabs {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   background: var(--surface-strong);
   border-radius: var(--pill);
   padding: 4px;
@@ -256,15 +189,12 @@ button:focus-visible {
   top: 4px;
   bottom: 4px;
   left: 4px;
-  width: calc(50% - 4px);
+  width: calc((100% - 8px) / 3);
   background: var(--surface);
   border-radius: var(--pill);
   box-shadow: var(--shadow);
+  transform: translateX(calc(var(--i, 0) * 100%));
   transition: transform 0.45s var(--ease);
-}
-
-.app[data-tab='calc'] .tabs-thumb {
-  transform: translateX(100%);
 }
 
 .tab {
@@ -293,17 +223,7 @@ button:focus-visible {
   color: var(--ink);
 }
 
-.tab .orb {
-  transition: transform 0.3s var(--ease), opacity 0.3s ease;
-  opacity: 0.75;
-}
-
-.tab[aria-selected='true'] .orb {
-  opacity: 1;
-  transform: scale(1.15);
-}
-
-/* ---------- Chips & icon buttons ---------- */
+/* ---------- Chips ---------- */
 
 .chip {
   display: inline-flex;
@@ -329,33 +249,15 @@ button:focus-visible {
   opacity: 0.6;
 }
 
-.icon-btn {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 36px;
-  margin: -4px -8px 0 0;
-  border-radius: var(--pill);
-  color: var(--ink);
-  transition: background-color 0.15s ease, transform 0.15s var(--ease);
-}
-
-.icon-btn:active {
-  background: var(--surface-strong);
-  transform: scale(0.92);
-}
-
-.icon-btn svg {
-  width: 24px;
-  height: 24px;
-}
-
 /* ---------- Keypads ---------- */
 
+/* Both keypads share 5 equal rows; the top row holds calculator extras,
+   or the denominator strip after "/". */
 .keypad {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: var(--key-gap);
 }
 
 .key {
@@ -402,31 +304,8 @@ button:focus-visible {
   font-size: 28px;
 }
 
-.key.eq::before {
-  /* subtle grain on the ink key */
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--grain);
-  background-size: 140px;
-  mix-blend-mode: soft-light;
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 .key.eq:active {
   background: var(--ink);
-}
-
-.key.unit {
-  background: var(--violet-soft);
-  color: var(--violet);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.key.unit:active {
-  background: var(--violet-press);
 }
 
 .key.small-label {
@@ -444,6 +323,66 @@ button:focus-visible {
   pointer-events: none;
 }
 
+/* ---------- Denominator strip ---------- */
+
+.denoms {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc((100% - 4 * var(--key-gap)) / 5);
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition:
+    opacity 0.18s ease,
+    transform 0.25s var(--ease);
+}
+
+.denoms.show {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.denom {
+  border-radius: var(--r-xl);
+  background: var(--orange-soft);
+  color: var(--accent);
+  font-size: 19px;
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px rgba(255, 84, 23, 0.18);
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s var(--ease),
+    opacity 0.2s ease;
+}
+
+.denom:active {
+  background: #ffe0d1;
+  transform: scale(0.94);
+}
+
+.denom:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.denom-slash {
+  margin-right: 1px;
+  font-weight: 400;
+  opacity: 0.55;
+}
+
+/* The calculator's top row hides under the strip while it shows. */
+.calc-keys:has(.denoms.show) > .key:nth-child(-n + 5) {
+  opacity: 0;
+}
+
 /* ---------- Caret (shared) ---------- */
 
 .caret {
@@ -453,7 +392,7 @@ button:focus-visible {
   height: 1em;
   margin: 0 -1px;
   border-radius: 1px;
-  background: var(--blue);
+  background: var(--ink);
   vertical-align: -0.12em;
   animation: blink 1.1s steps(1) infinite;
   pointer-events: none;
@@ -547,7 +486,7 @@ button:focus-visible {
 .field-value .sel {
   display: inline-flex;
   align-items: baseline;
-  background: var(--blue-soft);
+  background: var(--surface-strong);
   border-radius: 6px;
   margin-left: -3px;
   padding: 0 3px;
@@ -567,16 +506,13 @@ button:focus-visible {
   min-height: 8px;
 }
 
-.conv-hint {
-  text-align: center;
-  font-size: 13px;
-  color: var(--muted);
-  min-height: 18px;
-  margin: 0;
+.conv-keys {
+  grid-template-rows: repeat(5, minmax(46px, 62px));
 }
 
-.conv-keys {
-  grid-auto-rows: minmax(52px, 64px);
+/* Holds the top row free for the denominator strip. */
+.keypad-spacer {
+  grid-column: 1 / -1;
 }
 
 /* ---------- Calculator ---------- */
@@ -621,7 +557,6 @@ button:focus-visible {
   unicode-bidi: isolate;
 }
 
-.history .ghost,
 .history .rd {
   display: none;
 }
@@ -680,13 +615,9 @@ button:focus-visible {
   overflow: hidden;
 }
 
-/* Inches is the default: a faded ″ follows a bare number. */
+/* Inches is the default: a ″ follows a bare number. */
 .expr .ghost {
-  color: var(--muted-soft);
-}
-
-.expr .rd {
-  font-size: 0.6em;
+  color: var(--ink);
 }
 
 .result {
@@ -718,8 +649,9 @@ button:focus-visible {
 .calc-keys {
   flex: 3 1 0;
   min-height: 0;
-  max-height: 440px;
-  grid-template-rows: repeat(5, minmax(38px, 1fr)) minmax(32px, 0.72fr);
+  max-height: 360px;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(5, minmax(40px, 1fr));
 }
 
 .calc-keys .key {
@@ -736,7 +668,7 @@ button:focus-visible {
   padding: 8px 8px 6px;
   --mode: var(--blue);
   --mode-soft: var(--blue-soft);
-  --tick: var(--hairline-strong);
+  --tick: var(--hairline);
 }
 
 .series[data-mode='split'] {
@@ -839,10 +771,10 @@ button:focus-visible {
 /* Minor ticks, evenly dividing the space between measurement marks. */
 .ruler {
   position: absolute;
-  left: var(--pad);
-  right: var(--pad);
-  top: 38px;
-  height: 10px;
+  left: var(--pad-l);
+  right: var(--pad-r);
+  top: 40px;
+  height: 6px;
   background: repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px var(--period));
 }
 
@@ -874,9 +806,9 @@ button:focus-visible {
 
 .pt-label .rd {
   position: absolute;
+  top: 1px;
   left: 100%;
-  bottom: 5px;
-  margin-left: 2px;
+  margin-left: 1px;
 }
 
 .pt-tick {
@@ -884,8 +816,7 @@ button:focus-visible {
   width: 2px;
   height: 32px;
   border-radius: 1px;
-  background: var(--mode);
-  transition: background-color 0.3s ease;
+  background: var(--ink);
 }
 
 .pt.end .pt-label {
@@ -905,6 +836,404 @@ button:focus-visible {
   place-items: center;
   font-size: 13px;
   color: var(--muted-soft);
+}
+
+/* ---------- Level ---------- */
+
+.lvl-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 0;
+}
+
+.lvl-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.96px;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.lvl-dev {
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The "level" lamp, like an indicator LED. */
+.lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hairline-strong);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.is-level .lamp {
+  background: var(--orange);
+  box-shadow: 0 0 0 3px rgba(255, 84, 23, 0.18);
+}
+
+.lvl-angle {
+  margin-top: 2px;
+  font-size: 64px;
+  font-weight: 300;
+  letter-spacing: -2.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.lvl-angle .lead {
+  color: #d2cfcb;
+}
+
+.lvl-angle .hund {
+  color: var(--muted-soft);
+}
+
+.lvl-angle .deg {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 0.6em;
+  vertical-align: 0.5em;
+}
+
+.lvl-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.pill-btn {
+  height: 36px;
+  padding: 0 18px;
+  border-radius: var(--pill);
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.15s ease, transform 0.15s var(--ease);
+}
+
+.pill-btn:active {
+  transform: scale(0.95);
+  background: var(--ink);
+}
+
+.pill-btn.quiet {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.pill-btn.quiet:active {
+  background: var(--surface-press);
+}
+
+.lvl-dial,
+.lvl-offset {
+  border-radius: var(--r-xxl);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  overflow: hidden;
+}
+
+.lvl-dial {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lvl-dial > svg,
+.lvl-offset > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  flex-shrink: 0;
+}
+
+/* Scales, shared by the dial and the gauge. */
+svg .tk {
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+
+svg .tk.major {
+  stroke-width: 1.5;
+}
+
+svg .tl {
+  font-size: 10px;
+  font-weight: 500;
+  fill: var(--body);
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+svg .base {
+  fill: none;
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+
+svg .vk {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+/* The vernier line that lines up with the main scale. */
+svg .vk.on {
+  stroke: var(--orange);
+  stroke-width: 2;
+}
+
+svg .vl {
+  font-size: 9px;
+  fill: var(--muted-soft);
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+svg .vl.start {
+  text-anchor: start;
+}
+
+svg .index {
+  stroke: var(--orange);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.vial-wrap {
+  flex: 1;
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+}
+
+.vial,
+.bullseye {
+  grid-area: 1 / 1;
+  position: relative;
+  transition: opacity 0.3s ease, transform 0.4s var(--ease);
+}
+
+.vial {
+  width: 224px;
+  height: 36px;
+  border-radius: var(--pill);
+  background: var(--canvas);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.vial.plumb {
+  transform: rotate(90deg) scale(0.8);
+}
+
+.vial-mark {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 1.5px;
+  background: var(--ink);
+}
+
+.vial-mark.l {
+  left: calc(50% - 24px);
+}
+
+.vial-mark.r {
+  left: calc(50% + 23px);
+}
+
+.bubble {
+  position: absolute;
+  border-radius: var(--pill);
+  background: var(--ink);
+  transition: background-color 0.15s ease;
+}
+
+.vial .bubble {
+  left: calc(50% - 20px);
+  top: 7px;
+  width: 40px;
+  height: 22px;
+}
+
+.is-level .bubble {
+  background: var(--orange);
+}
+
+.bullseye {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: var(--canvas);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.bullseye .ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
+  transform: translate(-50%, -50%);
+}
+
+/* 14px per degree: rings at 1°, 2° and 4°. */
+.bullseye .r1 {
+  width: 28px;
+  height: 28px;
+  border-color: var(--ink);
+}
+
+.bullseye .r2 {
+  width: 56px;
+  height: 56px;
+}
+
+.bullseye .r3 {
+  width: 112px;
+  height: 112px;
+}
+
+.bullseye .cross {
+  position: absolute;
+  background: var(--hairline);
+}
+
+.bullseye .cross.h {
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 1px;
+}
+
+.bullseye .cross.v {
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 1px;
+}
+
+.bullseye .bubble {
+  left: calc(50% - 10px);
+  top: calc(50% - 10px);
+  width: 20px;
+  height: 20px;
+}
+
+.screen[data-mode='flat'] .vial,
+.screen:not([data-mode='flat']) .bullseye {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lvl-offset {
+  flex-shrink: 0;
+  padding: 10px 10px 4px;
+}
+
+.offset-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 8px;
+}
+
+.caps {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.96px;
+  text-transform: uppercase;
+}
+
+.dist-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.dist {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-lg);
+  background: var(--canvas);
+  text-align: left;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.dist-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.dist-value {
+  font-size: 17px;
+  white-space: nowrap;
+}
+
+.dist[aria-checked='true'] {
+  background: var(--primary);
+  color: #fff;
+}
+
+.dist[aria-checked='true'] .dist-label {
+  color: var(--muted-soft);
+}
+
+.lvl-offset > svg {
+  margin-top: 6px;
+}
+
+.offset-head .caps {
+  white-space: nowrap;
+}
+
+.lvl-gate {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  border-radius: var(--r-xxl);
+  background: var(--surface);
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--hairline);
+  text-align: center;
+}
+
+.lvl-gate[hidden] {
+  display: none;
+}
+
+.lvl-gate p {
+  margin: 0;
+  font-size: 15px;
+  color: var(--body);
+}
+
+.screen.gated .lvl-dial,
+.screen.gated .lvl-offset {
+  opacity: 0.35;
 }
 
 /* ---------- Precision sheet ---------- */
@@ -1009,7 +1338,7 @@ body.sheet-open .sheet {
   .expr {
     font-size: 36px;
   }
-  .keypad {
-    gap: 6px;
+  :root {
+    --key-gap: 6px;
   }
 }

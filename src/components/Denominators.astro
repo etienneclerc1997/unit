@@ -1,0 +1,16 @@
+---
+// One-tap denominators, shown over the keypad's top row right after "/".
+interface Props {
+  id: string;
+}
+const { id } = Astro.props;
+const DENOMS = [2, 4, 8, 16, 32, 64];
+---
+
+<div class="denoms" id={id} aria-hidden="true" role="group" aria-label="Denominator">
+  {DENOMS.map((d) => (
+    <button class="denom" data-d={d} tabindex="-1">
+      <span class="denom-slash">/</span>{d}
+    </button>
+  ))}
+</div>
