@@ -120,14 +120,25 @@ button:focus-visible {
   padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 12px);
 }
 
-/* clip (not hidden) so focusing a key can never scroll the screens.
-   pan-y lets horizontal drags reach the swipe handler. */
+/* The one vertical scroller for every screen: the main page fills the view
+   exactly (100cqh), and the active screen's extra section waits below the fold.
+   Scrolling snaps between the two. pan-y lets horizontal drags reach the swipe
+   handler (the page script also keeps it from ever scrolling sideways). */
 .viewport {
+  position: relative;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-  overflow: clip;
   margin: 0 -16px;
+  container-type: size;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+}
+
+.viewport::-webkit-scrollbar {
+  display: none;
 }
 
 .viewport,
@@ -140,36 +151,43 @@ button:focus-visible {
   touch-action: pan-x;
 }
 
-/* Three screens side by side; --i is the active tab index (set by the page script). */
-.track {
-  display: flex;
-  width: 300%;
-  height: 100%;
-  transform: translateX(calc(var(--i, 0) * -100% / 3));
-  transition: transform 0.45s var(--ease);
+/* Three screens side by side. --pos is where the track is, in screens: the
+   active tab index, or in between while a finger drags it (set by the page script). */
+@property --pos {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
 }
 
-/* Each screen scrolls vertically: the main page fills the view exactly, and any
-   extra section waits below the fold. Scrolling snaps between the two. */
+.app {
+  transition: --pos 0.45s var(--ease);
+}
+
+.app.swiping {
+  transition: none;
+}
+
+.track {
+  display: flex;
+  align-items: flex-start;
+  width: 300%;
+  transform: translateX(calc(var(--pos) * -100% / 3));
+}
+
 .screen {
   position: relative;
   width: calc(100% / 3);
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scroll-snap-type: y mandatory;
-  scrollbar-width: none;
   transition: opacity 0.3s ease;
 }
 
-.screen::-webkit-scrollbar {
+/* Mid-swipe the neighbor's section shows too, in case we're down there. */
+.app:not(.swiping) .screen.no-more .fold-more {
   display: none;
 }
 
 .fold-main {
   position: relative;
-  height: 100%;
+  height: 100cqh;
   padding: 16px 16px 28px;
   display: flex;
   flex-direction: column;
@@ -210,7 +228,7 @@ button:focus-visible {
   stroke-linejoin: round;
 }
 
-.screen.scrolled .fold-hint {
+.viewport.scrolled .fold-hint {
   opacity: 0;
   pointer-events: none;
 }
@@ -221,7 +239,7 @@ button:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .track,
+  .app,
   .screen {
     transition: none;
   }
@@ -307,8 +325,7 @@ button:focus-visible {
 
 /* ---------- Keypads ---------- */
 
-/* Both keypads share 5 equal rows; the top row holds calculator extras,
-   or the denominator strip after "/". */
+/* The shared keypad: four columns of equal rows (see the keys layer below). */
 .keypad {
   position: relative;
   display: grid;
@@ -434,13 +451,27 @@ button:focus-visible {
   opacity: 0.55;
 }
 
-/* In the calculator the strip covers the operator row, just above the digits
-   like on Convert; the operators hide under it while it shows. */
-.calc-keys .denoms {
+/* The strip covers the operator row, just above the digits; each screen has its
+   own, which fades out as the other screen comes in. The operators hide under
+   the calculator's while it shows. */
+.keypad .denoms {
   top: calc(var(--key-h) + var(--key-gap));
 }
 
-.calc-keys:has(.denoms.show) > .key.op {
+#conv-denoms.show {
+  opacity: clamp(0, 1 - var(--calc-p) * 4, 1);
+}
+
+#calc-denoms.show {
+  opacity: clamp(0, var(--calc-p) * 4 - 3, 1);
+}
+
+.app:not([data-tab='convert']) #conv-denoms,
+.app:not([data-tab='calc']) #calc-denoms {
+  pointer-events: none;
+}
+
+.app[data-tab='calc'] .keypad:has(#calc-denoms.show) > .key.op {
   opacity: 0;
 }
 
@@ -571,16 +602,31 @@ button:focus-visible {
   min-height: 0;
 }
 
-.conv-keys,
-.calc-keys {
+/* Each screen keeps room for its keypad (--rows tall)… */
+.keypad-slot {
   flex-shrink: 0;
-  grid-template-rows: repeat(5, var(--key-h));
+  height: calc(var(--rows) * var(--key-h) + (var(--rows) - 1) * var(--key-gap));
+}
+
+/* …while the one keypad sits in a layer over them, at the bottom of that room.
+   The layer scrolls with the page, holds still between Convert and Calculate,
+   and slides away with the calculator towards Level. */
+.keys-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100cqh;
+  overflow: clip;
+  pointer-events: none;
+  translate: calc(max(0, var(--pos) - 1) * -100%) 0;
 }
 
 /* The calculator has one more row on top and = below. --calc-p (0 on Convert,
-   1 on Calculate, following the finger mid-swipe) morphs it: at 0 its digits
-   sit exactly where Convert's do and the extra keys are gone; going to 1 the
-   keypad slides up, = rises in under it and the rows above fade in. */
+   1 on Calculate and beyond, following the track) morphs between the two: at 0
+   the keypad sits a row lower, so the 4×4 block is Convert's whole keypad, and
+   the extra keys are gone; going to 1 it slides up, = rises in under it and the
+   rows above fade in. */
 @property --calc-p {
   syntax: '<number>';
   inherits: true;
@@ -588,28 +634,42 @@ button:focus-visible {
 }
 
 .app {
-  transition: --calc-p 0.5s var(--ease);
+  --calc-p: clamp(0, var(--pos), 1);
 }
 
-.app.swiping {
-  transition: none;
-}
-
-.calc-keys {
+.keys-layer .keypad {
   --row: calc(var(--key-h) + var(--key-gap));
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 28px;
   grid-template-rows: repeat(7, var(--key-h));
+  pointer-events: auto;
   transform: translateY(calc((1 - var(--calc-p)) * var(--row)));
+}
+
+.app:not([data-tab='calc']) .keypad .key.extra {
+  pointer-events: none;
+}
+
+/* Keys Convert can't use right now; they light up on the way to Calculate. */
+.keypad .key.off {
+  opacity: calc(0.3 + 0.7 * var(--calc-p));
+}
+
+.app[data-tab='convert'] .keypad .key.off {
+  pointer-events: none;
 }
 
 /* `translate`/`scale` rather than `transform`, so the press effect still works;
    opacity and translate follow --calc-p directly, without their own easing. */
-.calc-keys .key {
+.keypad .key {
   transition:
     background-color 0.2s ease,
     transform 0.2s var(--ease);
 }
 
-.calc-keys .key.eq {
+.keypad .key.eq {
   grid-column: 1 / -1;
   opacity: clamp(0, var(--calc-p) * 1.6 - 0.4, 1);
   translate: 0 calc((1 - var(--calc-p)) * 0.6 * var(--row));
@@ -617,34 +677,23 @@ button:focus-visible {
 }
 
 /* Operators fade in first, then the unit row above them. */
-.calc-keys .key.op {
+.keypad .key.op {
   opacity: clamp(0, var(--calc-p) * 1.6 - 0.3, 1);
   translate: 0 calc((1 - var(--calc-p)) * 10px);
 }
 
-.calc-keys > .key:nth-child(-n + 4) {
+.keypad > .key:nth-child(-n + 4) {
   opacity: clamp(0, var(--calc-p) * 2 - 1, 1);
   translate: 0 calc((1 - var(--calc-p)) * 16px);
 }
 
 /* The ⌃ under = waits until = has settled. */
-#screen-calc:not(.scrolled) .fold-hint {
+.viewport:not(.scrolled) #screen-calc .fold-hint {
   opacity: clamp(0, var(--calc-p) * 3 - 2, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .app {
-    transition: none;
-  }
 }
 
 .keypad .key {
   min-height: 0;
-}
-
-/* Holds the top row free for the denominator strip. */
-.keypad-spacer {
-  grid-column: 1 / -1;
 }
 
 /* ---------- Calculator ---------- */
@@ -1235,7 +1284,7 @@ svg .index {
 
 /* Out over gets a whole page, so the distance runs along the long side. */
 .lvl-more {
-  height: 100%;
+  height: 100cqh;
   padding-top: 16px;
   display: flex;
   flex-direction: column;

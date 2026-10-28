@@ -1,25 +1,6 @@
 ---
 import Icon from './Icon.astro';
-
-import Denominators from './Denominators.astro';
 import FoldHint from './FoldHint.astro';
-
-// [label, key, style]. Four columns like the Convert keypad: the 4×4 block
-// matches it key for key, with units and operators above and = below.
-const keys: [string, string, string][] = [
-  ['(', '(', 'fn'], [')', ')', 'fn'], ['mm', 'mm', 'fn small-label'], ['cm', 'cm', 'fn small-label'],
-  ['÷', '÷', 'op'], ['×', '×', 'op'], ['−', '−', 'op'], ['+', '+', 'op'],
-  ['7', '7', ''], ['8', '8', ''], ['9', '9', ''], ['⌫', '⌫', 'fn'],
-  ['4', '4', ''], ['5', '5', ''], ['6', '6', ''], ['/', '/', ''],
-  ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['space', ' ', 'small-label'],
-  ['C', 'AC', 'fn'], ['0', '0', ''], ['.', '.', ''], ['ft ′', "'", 'small-label'],
-  ['=', '=', 'eq'],
-];
-const labels: Record<string, string> = {
-  '(': 'Open parenthesis', ')': 'Close parenthesis', '/': 'Fraction', '÷': 'Divide', '×': 'Multiply', '−': 'Minus',
-  '+': 'Plus', ' ': 'Space', '⌫': 'Delete (hold to clear)', '=': 'Equals', AC: 'Clear all', "'": 'Feet',
-  mm: 'Millimeters', cm: 'Centimeters',
-};
 ---
 
 <section class="screen" id="screen-calc" aria-label="Calculator">
@@ -36,14 +17,7 @@ const labels: Record<string, string> = {
     <div class="result" id="result" aria-live="polite"></div>
   </div>
 
-  <div class="keypad calc-keys">
-    {keys.map(([label, k, style]) => (
-      <button class:list={['key', style]} data-k={k} aria-label={labels[k]}>
-        {k === '⌫' ? <Icon name="backspace" /> : label}
-      </button>
-    ))}
-    <Denominators id="calc-denoms" />
-  </div>
+  <div class="keypad-slot" style="--rows: 7"></div>
   <FoldHint label="Repeat and split" />
   </div>
 
@@ -257,14 +231,16 @@ const labels: Record<string, string> = {
     render();
   }
 
-  document.querySelector('.calc-keys')!.addEventListener('click', (e) => {
+  // The keypad is shared with Convert.
+  const onCalc = () => document.querySelector('.app')?.getAttribute('data-tab') === 'calc';
+  document.querySelector('.keypad')!.addEventListener('click', (e) => {
     const k = (e.target as HTMLElement).closest<HTMLButtonElement>('.key');
-    if (!k || k.closest('.denoms')) return;
+    if (!k || !onCalc()) return;
     haptic();
     key(k.dataset.k!);
   });
 
-  onLongPress(document.querySelector<HTMLElement>('.calc-keys [data-k="⌫"]')!, () => (haptic(), key('AC')));
+  onLongPress(document.querySelector<HTMLElement>('.keypad [data-k="⌫"]')!, () => onCalc() && (haptic(), key('AC')));
   onDenom(denoms, (digits) => {
     state = digits.reduce(press, state);
     render();

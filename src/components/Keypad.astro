@@ -1,0 +1,33 @@
+---
+import Icon from './Icon.astro';
+import Denominators from './Denominators.astro';
+
+// The one keypad Convert and Calculate share. [label, key, style, kind]: the 4×4
+// block is Convert's whole keypad; the calculator adds units and operators above
+// and = below ("extra"). Convert dims "frac" keys outside fraction fields and
+// "ft" outside feet.
+const keys: [string, string, string, string][] = [
+  ['(', '(', 'fn extra', ''], [')', ')', 'fn extra', ''], ['mm', 'mm', 'fn small-label extra', ''], ['cm', 'cm', 'fn small-label extra', ''],
+  ['÷', '÷', 'op extra', ''], ['×', '×', 'op extra', ''], ['−', '−', 'op extra', ''], ['+', '+', 'op extra', ''],
+  ['7', '7', '', ''], ['8', '8', '', ''], ['9', '9', '', ''], ['⌫', '⌫', 'fn', ''],
+  ['4', '4', '', ''], ['5', '5', '', ''], ['6', '6', '', ''], ['/', '/', '', 'frac'],
+  ['1', '1', '', ''], ['2', '2', '', ''], ['3', '3', '', ''], ['space', ' ', 'small-label', 'frac'],
+  ['C', 'AC', 'fn', ''], ['0', '0', '', ''], ['.', '.', '', ''], ['ft ′', "'", 'small-label', 'ft'],
+  ['=', '=', 'eq extra', ''],
+];
+const labels: Record<string, string> = {
+  '(': 'Open parenthesis', ')': 'Close parenthesis', '/': 'Fraction', '÷': 'Divide', '×': 'Multiply', '−': 'Minus',
+  '+': 'Plus', ' ': 'Space', '⌫': 'Delete (hold to clear)', '=': 'Equals', AC: 'Clear all', "'": 'Feet',
+  mm: 'Millimeters', cm: 'Centimeters',
+};
+---
+
+<div class="keypad">
+  {keys.map(([label, k, style, kind]) => (
+    <button class:list={['key', style]} data-k={k} data-kind={kind} aria-label={labels[k]}>
+      {k === '⌫' ? <Icon name="backspace" /> : label}
+    </button>
+  ))}
+  <Denominators id="conv-denoms" />
+  <Denominators id="calc-denoms" />
+</div>

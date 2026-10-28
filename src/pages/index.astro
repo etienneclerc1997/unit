@@ -3,11 +3,12 @@ import App from '../layouts/App.astro';
 import Conversion from '../components/Conversion.astro';
 import Calculator from '../components/Calculator.astro';
 import Level from '../components/Level.astro';
+import Keypad from '../components/Keypad.astro';
 import { PRECISIONS } from '../lib/units';
 ---
 
 <App title="Unit">
-  <main class="app" data-tab="convert" style="--i: 0">
+  <main class="app" data-tab="convert" style="--i: 0; --pos: 0">
     <div class="tabs" role="tablist">
       <div class="tabs-thumb"></div>
       <button class="tab" role="tab" data-tab="convert" aria-selected="true" aria-controls="screen-convert">
@@ -26,6 +27,11 @@ import { PRECISIONS } from '../lib/units';
         <Conversion />
         <Calculator />
         <Level />
+      </div>
+      <!-- One keypad for Convert and Calculate: it holds still and morphs while
+           the screens slide under it, and leaves with the calculator for Level. -->
+      <div class="keys-layer">
+        <Keypad />
       </div>
     </div>
   </main>
@@ -59,18 +65,23 @@ import { PRECISIONS } from '../lib/units';
   const screens = track.querySelectorAll<HTMLElement>('.screen');
   const convLabel = document.querySelector<HTMLElement>('.tab[data-tab="convert"] .tab-label')!;
   const index = () => Math.max(0, TABS.indexOf(app.dataset.tab!));
-  const CALC = TABS.indexOf('calc');
 
-  // How far the calculator keypad has morphed from Convert's (0) to its own (1).
-  const setCalcPose = (p: number) => app.style.setProperty('--calc-p', p.toFixed(3));
+  // Where the track is, in screens (fractional mid-swipe). The keypads morph from it.
+  const setPos = (p: number) => app.style.setProperty('--pos', p.toFixed(4));
 
   function setTab(tab: string) {
     const i = Math.max(0, TABS.indexOf(tab));
     app.dataset.tab = TABS[i];
     app.style.setProperty('--i', String(i));
+    setPos(i);
     tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === TABS[i])));
     screens.forEach((s, n) => s.classList.toggle('active', n === i));
-    setCalcPose(i === CALC ? 1 : 0);
+    // Only the active screen keeps its section below the fold. Head back up first
+    // if we're down there, so the page doesn't jump when the old one goes.
+    if (viewport.scrollTop > 1) {
+      pendingMore = true;
+      viewport.scrollTo({ top: 0, behavior: 'smooth' });
+    } else syncMore();
     // Away from Convert, its tab peeks at the last converted value.
     convLabel.innerHTML = i > 0 && shared.convPeek ? shared.convPeek : 'Convert';
     save('tab', TABS[i]);
@@ -82,6 +93,34 @@ import { PRECISIONS } from '../lib/units';
       if (app.dataset.tab === t.dataset.tab) return;
       haptic();
       setTab(t.dataset.tab!);
+    }),
+  );
+
+  /* ---------- Below the fold ---------- */
+
+  // The viewport scrolls vertically for every screen at once, so the shared keypad
+  // scrolls natively with whichever page is showing.
+  let pendingMore = false;
+  const syncMore = () => {
+    pendingMore = false;
+    screens.forEach((s, n) => s.classList.toggle('no-more', n !== index()));
+  };
+
+  viewport.addEventListener(
+    'scroll',
+    () => {
+      // Overflow can't be clipped sideways in a vertical scroller; never let focus shift it.
+      if (viewport.scrollLeft) viewport.scrollLeft = 0;
+      viewport.classList.toggle('scrolled', viewport.scrollTop > 24);
+      if (pendingMore && viewport.scrollTop <= 1) syncMore();
+    },
+    { passive: true },
+  );
+
+  screens.forEach((s) =>
+    s.querySelector('.fold-hint')?.addEventListener('click', () => {
+      haptic();
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
     }),
   );
 
@@ -106,7 +145,6 @@ import { PRECISIONS } from '../lib/units';
       if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
       dragging = true;
       viewport.setPointerCapture(e.pointerId);
-      track.style.transition = 'none';
       app.classList.add('swiping');
     }
     const w = viewport.clientWidth;
@@ -115,9 +153,7 @@ import { PRECISIONS } from '../lib/units';
     // Rubber-band past either end.
     if (x > 0) x /= 4;
     if (x < min) x = min + (x - min) / 4;
-    track.style.transform = `translateX(${x}px)`;
-    // The keypad morphs with the finger, by how centered the calculator is.
-    setCalcPose(Math.max(0, 1 - Math.abs(x + w * CALC) / w));
+    setPos(-x / w);
   });
 
   const endSwipe = (e: PointerEvent) => {
@@ -129,8 +165,6 @@ import { PRECISIONS } from '../lib/units';
     const dx = e.clientX - s.x;
     const velocity = dx / Math.max(1, e.timeStamp - s.t);
     const w = viewport.clientWidth;
-    track.style.transition = '';
-    track.style.transform = '';
     app.classList.remove('swiping');
     suppressNextClick(viewport);
     const go = Math.abs(dx) > w * 0.25 || Math.abs(velocity) > 0.4;
@@ -138,28 +172,16 @@ import { PRECISIONS } from '../lib/units';
     if (go && next >= 0 && next < TABS.length) {
       haptic();
       setTab(TABS[next]);
-    } else setCalcPose(index() === CALC ? 1 : 0);
+    } else setPos(index());
   };
   viewport.addEventListener('pointerup', endSwipe);
   viewport.addEventListener('pointercancel', endSwipe);
 
-  /* ---------- Below the fold ---------- */
-
-  screens.forEach((s) => {
-    const hint = s.querySelector<HTMLElement>('.fold-hint');
-    if (!hint) return;
-    hint.addEventListener('click', () => {
-      haptic();
-      s.scrollTo({ top: s.scrollHeight, behavior: 'smooth' });
-    });
-    s.addEventListener('scroll', () => s.classList.toggle('scrolled', s.scrollTop > 24), { passive: true });
-  });
-
   initPrecisionSheet();
   // Restore without animating.
-  track.style.transition = app.style.transition = 'none';
+  app.style.transition = 'none';
   setTab(load<string>('tab', 'convert'));
-  requestAnimationFrame(() => requestAnimationFrame(() => (track.style.transition = app.style.transition = '')));
+  requestAnimationFrame(() => requestAnimationFrame(() => (app.style.transition = '')));
   // Once every screen script has run, refresh so the peek is filled in (and the level starts).
   document.addEventListener('DOMContentLoaded', () => setTab(app.dataset.tab!));
 </script>

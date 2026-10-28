@@ -1,15 +1,6 @@
 ---
 import { FIELDS } from '../lib/units';
 import Icon from './Icon.astro';
-import Denominators from './Denominators.astro';
-
-// [label, value, kind]; kind "frac" keys only work in fraction fields, "ft" only in feet.
-const keys: [string, string, string][] = [
-  ['7', '7', ''], ['8', '8', ''], ['9', '9', ''], ['⌫', 'back', 'fn'],
-  ['4', '4', ''], ['5', '5', ''], ['6', '6', ''], ['/', '/', 'frac'],
-  ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['space', ' ', 'frac'],
-  ['C', 'clear', 'fn'], ['0', '0', ''], ['.', '.', ''], ['ft ′', "'", 'ft'],
-];
 ---
 
 <section class="screen" id="screen-convert" aria-label="Conversion">
@@ -33,21 +24,8 @@ const keys: [string, string, string][] = [
 
   <div class="conv-spacer"></div>
 
-  <!-- Same rows as the calculator keypad; the top row is only used by the denominator strip. -->
-  <div class="keypad conv-keys">
-    <div class="keypad-spacer"></div>
-    <Denominators id="conv-denoms" />
-    {keys.map(([label, value, kind]) => (
-      <button
-        class:list={['key', kind === 'fn' && 'fn', (value === ' ' || kind === 'ft') && 'small-label']}
-        data-k={value}
-        data-kind={kind}
-        aria-label={value === 'back' ? 'Delete' : value === ' ' ? 'Space' : value === 'clear' ? 'Clear all' : undefined}
-      >
-        {value === 'back' ? <Icon name="backspace" /> : label}
-      </button>
-    ))}
-  </div>
+  <!-- Room for the keypad, which sits in a fixed layer over the screens (see index). -->
+  <div class="keypad-slot" style="--rows: 5"></div>
   </div>
 </section>
 
@@ -122,11 +100,12 @@ const keys: [string, string, string][] = [
     precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
 
     const def = defOf(state.active);
-    document.querySelectorAll<HTMLButtonElement>('.conv-keys .key').forEach((k) => {
+    document.querySelectorAll<HTMLButtonElement>('.keypad .key[data-kind]').forEach((k) => {
       const kind = k.dataset.kind;
-      k.disabled =
+      k.classList.toggle('off',
         (kind === 'frac' && !def.fractional) ||
-        (kind === 'ft' && (def.key !== 'ftFrac' || (!fresh && state.text.includes("'"))));
+        (kind === 'ft' && (def.key !== 'ftFrac' || (!fresh && state.text.includes("'")))),
+      );
     });
 
     updateDenoms(denoms, !fresh && state.text.endsWith('/') ? state.text.slice(0, -1) : null);
@@ -182,14 +161,18 @@ const keys: [string, string, string][] = [
 
   fieldEls.forEach((el, key) => el.addEventListener('click', () => (haptic(), activate(key))));
 
-  document.querySelector('.conv-keys')!.addEventListener('click', (e) => {
+  // The keypad is shared with the calculator, whose key names it uses.
+  const onConvert = () => document.querySelector('.app')?.getAttribute('data-tab') === 'convert';
+  const KEY: Record<string, string> = { '⌫': 'back', AC: 'clear' };
+  document.querySelector('.keypad')!.addEventListener('click', (e) => {
     const k = (e.target as HTMLElement).closest<HTMLButtonElement>('.key');
-    if (!k) return;
+    if (!k || !onConvert() || k.matches('.extra, .off')) return;
     haptic();
-    input(k.dataset.k!);
+    input(KEY[k.dataset.k!] ?? k.dataset.k!);
   });
 
-  onLongPress(document.querySelector<HTMLElement>('.conv-keys [data-k="back"]')!, () => {
+  onLongPress(document.querySelector<HTMLElement>('.keypad [data-k="⌫"]')!, () => {
+    if (!onConvert()) return;
     haptic();
     input('clear');
   });
