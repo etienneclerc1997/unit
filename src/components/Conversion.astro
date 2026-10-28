@@ -1,0 +1,188 @@
+---
+import { FIELDS } from '../lib/units';
+import Icon from './Icon.astro';
+
+// [label, value, kind]; kind "frac" keys only work in fraction fields, "ft" only in feet.
+const keys: [string, string, string][] = [
+  ['7', '7', ''], ['8', '8', ''], ['9', '9', ''], ['⌫', 'back', 'fn'],
+  ['4', '4', ''], ['5', '5', ''], ['6', '6', ''], ['/', '/', 'frac'],
+  ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['space', ' ', 'frac'],
+  ['C', 'clear', 'fn'], ['0', '0', ''], ['.', '.', ''], ['ft ′', "'", 'ft'],
+];
+---
+
+<section class="screen" id="screen-convert" aria-label="Conversion">
+  <div class="fields">
+    {FIELDS.map((f) => (
+      <div class="field-wrap">
+        <button class="field" data-key={f.key} aria-pressed="false" data-fresh="true">
+          <span class="field-label">{f.label}</span>
+          <span class="field-value">
+            <span class="field-text"></span>
+            <span class="caret"></span>
+            {f.unit && <span class="field-unit">{f.unit === '"' ? '″' : f.unit}</span>}
+          </span>
+        </button>
+        {f.key === 'inFrac' && (
+          <button class="chip" id="conv-prec" aria-label="Fraction precision">
+            <span class="chip-text">1/32</span>
+            <Icon name="chevron" />
+          </button>
+        )}
+      </div>
+    ))}
+  </div>
+
+  <div class="conv-spacer"></div>
+  <p class="conv-hint" id="conv-hint"></p>
+
+  <div class="keypad conv-keys">
+    {keys.map(([label, value, kind]) => (
+      <button
+        class:list={['key', kind === 'fn' && 'fn', (kind === 'frac' || kind === 'ft') && 'small-label']}
+        data-k={value}
+        data-kind={kind}
+        aria-label={value === 'back' ? 'Delete' : value === ' ' ? 'Space' : value === 'clear' ? 'Clear all' : undefined}
+      >
+        {value === 'back' ? <Icon name="backspace" /> : label}
+      </button>
+    ))}
+  </div>
+</section>
+
+<script>
+  import { FIELDS, type FieldKey, formatInchFraction } from '../lib/units';
+  import { haptic, shared, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel, onLongPress } from '../lib/ui';
+
+  const fieldEls = new Map<FieldKey, HTMLButtonElement>();
+  document.querySelectorAll<HTMLButtonElement>('.field').forEach((el) => fieldEls.set(el.dataset.key as FieldKey, el));
+
+  interface ConvState {
+    active: FieldKey;
+    text: string; // what the user typed in the active field
+    inches: number | null;
+  }
+
+  let state: ConvState = load('conv', { active: 'inFrac', text: '', inches: null });
+  let fresh = true; // the active field's text is "selected": the next key replaces it
+  let precision = loadPrecision('convPrec');
+
+  const precChip = document.getElementById('conv-prec')!;
+  const hint = document.getElementById('conv-hint')!;
+
+  function setSize(el: HTMLElement, len: number) {
+    el.dataset.size = len > 11 ? 's' : len > 8 ? 'm' : '';
+  }
+
+  function render() {
+    for (const f of FIELDS) {
+      const el = fieldEls.get(f.key)!;
+      const isActive = f.key === state.active;
+      const text = isActive ? state.text : state.inches === null ? '' : f.format(state.inches, precision);
+      const out = el.querySelector<HTMLElement>('.field-text')!;
+      out.innerHTML = prettyHTML(text);
+      setSize(el.querySelector('.field-value')!, text.length + (f.unit.length > 1 ? 1 : 0));
+      el.setAttribute('aria-pressed', String(isActive));
+      el.dataset.fresh = String(isActive && fresh);
+    }
+    precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
+
+    const def = FIELDS.find((f) => f.key === state.active)!;
+    document.querySelectorAll<HTMLButtonElement>('.conv-keys .key').forEach((k) => {
+      const kind = k.dataset.kind;
+      k.disabled = (kind === 'frac' && !def.fractional) || (kind === 'ft' && def.key !== 'ftFrac');
+    });
+
+    hint.textContent = state.text && state.inches === null ? 'Keep typing…' : '';
+
+    save('conv', state);
+    shared.convPeek = state.inches === null ? '' : formatInchFraction(state.inches, precision);
+  }
+
+  function activate(key: FieldKey) {
+    if (key === state.active) {
+      // Tapping the active field again toggles between "select all" and caret-at-end.
+      if (state.text) fresh = !fresh;
+    } else {
+      const def = FIELDS.find((f) => f.key === key)!;
+      state = { ...state, active: key, text: state.inches === null ? '' : def.format(state.inches, precision) };
+      fresh = true;
+    }
+    render();
+  }
+
+  function input(k: string) {
+    const def = FIELDS.find((f) => f.key === state.active)!;
+    let text = state.text;
+    if (k === 'clear') {
+      state = { ...state, text: '', inches: null };
+      fresh = true;
+      return render();
+    }
+    if (k === 'back') {
+      text = fresh ? '' : text.slice(0, -1);
+    } else {
+      if (fresh) text = '';
+      if (k === '.' && /\.\d*$/.test(text.split(/[\s/']/).pop() ?? '')) return;
+      if (k === '.' && (text === '' || /[\s/']$/.test(text))) text += '0';
+      if (k === ' ' && (text === '' || /[\s/']$/.test(text) || / \d|\//.test(text.split("'").pop()!))) return;
+      if (k === '/' && !/\d$/.test(text)) return;
+      if (k === '/' && /\//.test(text.split(/[\s']/).pop() ?? '')) return;
+      if (k === "'" && (!/\d$/.test(text) || text.includes("'"))) return;
+      if (text.length >= 16) return;
+      text += k;
+    }
+    fresh = false;
+    // A half-typed value ("3 1/") keeps the last good conversion visible.
+    const parsed = def.parse(text);
+    state = { ...state, text, inches: text === '' ? null : parsed ?? state.inches };
+    render();
+  }
+
+  fieldEls.forEach((el, key) => el.addEventListener('click', () => (haptic(), activate(key))));
+
+  document.querySelector('.conv-keys')!.addEventListener('click', (e) => {
+    const k = (e.target as HTMLElement).closest<HTMLButtonElement>('.key');
+    if (!k) return;
+    haptic();
+    input(k.dataset.k!);
+  });
+
+  onLongPress(document.querySelector<HTMLElement>('.conv-keys [data-k="back"]')!, () => {
+    haptic();
+    input('clear');
+  });
+
+  precChip.addEventListener('click', () => {
+    haptic();
+    openPrecisionSheet(precision, (p) => {
+      precision = p;
+      save('convPrec', p);
+      // An untouched value in a fraction field follows the new precision.
+      const def = FIELDS.find((f) => f.key === state.active)!;
+      if (fresh && def.fractional && state.inches !== null) state.text = def.format(state.inches, p);
+      render();
+    });
+  });
+
+  // Hardware keyboard support (desktop / tablets).
+  document.addEventListener('keydown', (e) => {
+    if (document.querySelector('.app')?.getAttribute('data-tab') !== 'convert' || e.metaKey || e.ctrlKey) return;
+    const map: Record<string, string> = { Backspace: 'back', Escape: 'clear', Delete: 'clear', '"': '' };
+    const k = e.key in map ? map[e.key] : e.key;
+    if (/^[\d./' ]$/.test(k) || k === 'back' || k === 'clear') {
+      e.preventDefault();
+      input(k);
+    } else if (k === 'Tab') {
+      e.preventDefault();
+      const i = FIELDS.findIndex((f) => f.key === state.active);
+      activate(FIELDS[(i + (e.shiftKey ? FIELDS.length - 1 : 1)) % FIELDS.length].key);
+    }
+  });
+
+  // Restore: show the stored value formatted in the active field.
+  if (state.inches !== null && state.text === '') {
+    state.text = FIELDS.find((f) => f.key === state.active)!.format(state.inches, precision);
+  }
+  render();
+</script>

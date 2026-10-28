@@ -1,0 +1,251 @@
+---
+import Icon from './Icon.astro';
+
+// [label, key, style]
+const keys: [string, string, string][] = [
+  ['AC', 'AC', 'fn'], ['( )', '()', 'fn'], ['/', '/', 'frac'], ['÷', '÷', 'op'],
+  ['7', '7', ''], ['8', '8', ''], ['9', '9', ''], ['×', '×', 'op'],
+  ['4', '4', ''], ['5', '5', ''], ['6', '6', ''], ['−', '−', 'op'],
+  ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['+', '+', 'op'],
+  ['0', '0', ''], ['.', '.', ''], ['⌫', '⌫', 'fn'], ['=', '=', 'eq'],
+  ['ft', "'", 'unit'], ['in', '"', 'unit'], ['mm', 'mm', 'unit'], ['cm', 'cm', 'unit'],
+];
+const labels: Record<string, string> = {
+  '()': 'Parentheses', '/': 'Fraction', '÷': 'Divide', '×': 'Multiply', '−': 'Minus', '+': 'Plus',
+  '⌫': 'Delete', '=': 'Equals', AC: 'All clear', "'": 'Feet', '"': 'Inches', mm: 'Millimeters', cm: 'Centimeters',
+};
+---
+
+<section class="screen" id="screen-calc" aria-label="Calculator">
+  <div class="display" data-fresh="false">
+    <div class="display-top">
+      <button class="chip" id="calc-prec" aria-label="Answer precision">
+        <span class="chip-text">1/32</span>
+        <Icon name="chevron" />
+      </button>
+      <div class="history" id="history"></div>
+    </div>
+    <div class="expr" id="expr" aria-live="polite"></div>
+    <div class="result" id="result" aria-live="polite"></div>
+  </div>
+
+  <div class="keypad calc-keys">
+    {keys.map(([label, k, style]) => (
+      <button class:list={['key', style === 'frac' ? '' : style]} data-k={k} aria-label={labels[k]}>
+        {k === '⌫' ? <Icon name="backspace" /> : label}
+      </button>
+    ))}
+  </div>
+
+  <div class="series" data-mode="repeat">
+    <div class="series-bar">
+      <button class="mode-toggle" id="mode-toggle" aria-label="Switch between repeat and split">
+        <Icon name="swap" />
+        <span id="mode-label">Repeat</span>
+      </button>
+      <div class="counter">
+        <button id="count-dec" aria-label="Fewer"><Icon name="minus" /></button>
+        <output id="count" aria-live="polite">2</output>
+        <button id="count-inc" aria-label="More"><Icon name="plus" /></button>
+      </div>
+    </div>
+    <div class="line-scroll" id="line-scroll">
+      <div class="line" id="line"><div class="line-track"></div></div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import { lex, evaluate, press, series, emptyState, type CalcState, type SeriesMode } from '../lib/calc';
+  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, inchHTML, precisionLabel, onLongPress } from '../lib/ui';
+  import { formatInchFraction } from '../lib/units';
+
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+  const display = document.querySelector<HTMLElement>('.display')!;
+  const exprEl = $('expr');
+  const resultEl = $('result');
+  const historyEl = $('history');
+  const precChip = $('calc-prec');
+  const seriesEl = document.querySelector<HTMLElement>('.series')!;
+  const lineScroll = $('line-scroll');
+  const line = $('line');
+
+  let state: CalcState = { ...emptyState(), ...load<Partial<CalcState>>('calc', {}) };
+  let precision = loadPrecision('calcPrec');
+  let mode: SeriesMode = load<SeriesMode>('mode', 'repeat') === 'split' ? 'split' : 'repeat';
+  let count = Math.min(99, Math.max(1, load<number>('count', 2)));
+
+  /* ---------- Expression rendering ---------- */
+
+  function exprHTML(tokens: string[], ans: number): string {
+    let html = '';
+    let prevUnit = false;
+    for (const it of lex(tokens)) {
+      switch (it.k) {
+        case 'num':
+          html += (prevUnit ? ' ' : '') + prettyHTML(it.text);
+          break;
+        case 'ans':
+          html += inchHTML(ans, precision, false);
+          break;
+        case 'op':
+          html += `<span class="op-sym">${it.v}</span>`;
+          break;
+        case 'lp':
+          html += '(';
+          break;
+        case 'rp':
+          html += ')';
+          break;
+        case 'unit':
+          html += it.v === "'" ? '′' : it.v === '"' ? '″' : `<span class="unit-sym">&thinsp;${it.v}</span>`;
+          break;
+      }
+      prevUnit = it.k === 'unit';
+    }
+    return html;
+  }
+
+  function render() {
+    const html = exprHTML(state.tokens, state.ans);
+    exprEl.innerHTML = html;
+    const len = exprEl.textContent!.length;
+    exprEl.dataset.size = len > 16 ? 's' : len > 10 ? 'm' : '';
+    exprEl.scrollLeft = exprEl.scrollWidth;
+
+    const onlyAns = state.tokens.length === 1 && state.tokens[0] === 'ANS';
+    const v = evaluate(state.tokens, state.ans);
+    resultEl.innerHTML = v === null || onlyAns ? '' : inchHTML(v, precision);
+    display.dataset.fresh = String(onlyAns);
+
+    historyEl.innerHTML =
+      state.history && state.tokens[0] === 'ANS' ? `<span>${exprHTML(state.history, state.historyAns)} =</span>` : '';
+
+    precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
+    renderSeries();
+    save('calc', state);
+  }
+
+  /* ---------- Repeat / split line ---------- */
+
+  function renderSeries() {
+    seriesEl.dataset.mode = mode;
+    $('mode-label').textContent = mode === 'repeat' ? 'Repeat' : 'Split';
+    $('count').textContent = String(count);
+    $<HTMLButtonElement>('count-dec').disabled = count <= 1;
+    $<HTMLButtonElement>('count-inc').disabled = count >= 99;
+
+    // Right after "=", repeat still follows the equation that produced the answer.
+    const useHistory = mode === 'repeat' && state.tokens.length === 1 && state.tokens[0] === 'ANS' && state.history;
+    const pts = useHistory
+      ? series(mode, state.history!, state.historyAns, count)
+      : series(mode, state.tokens, state.ans, count);
+
+    const track = line.querySelector('.line-track')!;
+    if (!pts) {
+      line.querySelectorAll('.pt').forEach((p) => p.remove());
+      line.querySelector('.line-empty')?.remove();
+      const empty = document.createElement('div');
+      empty.className = 'line-empty';
+      empty.textContent = mode === 'repeat' ? 'Type an equation to repeat it' : 'Type a measurement to split it';
+      line.append(empty);
+      (track as HTMLElement).hidden = true;
+      line.style.width = '';
+      return;
+    }
+    line.querySelector('.line-empty')?.remove();
+    (track as HTMLElement).hidden = false;
+
+    const labels = pts.map((p) => formatInchFraction(p, precision));
+    const longest = Math.max(...labels.map((l) => l.length));
+    // Diagonal fractions are compact: roughly 6.4px per character at 13px.
+    const labelW = longest * 6.4 + 20;
+    const pad = Math.max(18, labelW / 2);
+    const avail = lineScroll.clientWidth;
+    const width = Math.max(avail, pad * 2 + (pts.length - 1) * labelW);
+    line.style.width = `${width}px`;
+    line.style.setProperty('--pad', `${pad}px`);
+
+    const existing = Array.from(line.querySelectorAll<HTMLElement>('.pt'));
+    existing.slice(pts.length).forEach((p) => p.remove());
+    pts.forEach((p, i) => {
+      let el = existing[i];
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'pt';
+        el.innerHTML = '<span class="pt-label"></span><span class="pt-dot"></span>';
+        line.append(el);
+      }
+      el.querySelector('.pt-label')!.innerHTML = inchHTML(p, precision, false);
+      el.style.left = `${pad + (pts.length === 1 ? 0 : (i * (width - pad * 2)) / (pts.length - 1))}px`;
+    });
+  }
+
+  /* ---------- Input ---------- */
+
+  function key(k: string) {
+    const next = press(state, k);
+    if (k === '=' && next === state && state.tokens.length) {
+      display.dataset.error = 'true';
+      setTimeout(() => (display.dataset.error = 'false'), 300);
+    }
+    state = next;
+    render();
+  }
+
+  document.querySelector('.calc-keys')!.addEventListener('click', (e) => {
+    const k = (e.target as HTMLElement).closest<HTMLButtonElement>('.key');
+    if (!k) return;
+    haptic();
+    key(k.dataset.k!);
+  });
+
+  onLongPress(document.querySelector<HTMLElement>('.calc-keys [data-k="⌫"]')!, () => {
+    haptic();
+    key('AC');
+  });
+
+  $('mode-toggle').addEventListener('click', () => {
+    haptic();
+    mode = mode === 'repeat' ? 'split' : 'repeat';
+    save('mode', mode);
+    renderSeries();
+  });
+
+  const step = (d: number) => {
+    haptic();
+    count = Math.min(99, Math.max(1, count + d));
+    save('count', count);
+    renderSeries();
+  };
+  $('count-dec').addEventListener('click', () => step(-1));
+  $('count-inc').addEventListener('click', () => step(1));
+
+  precChip.addEventListener('click', () => {
+    haptic();
+    openPrecisionSheet(precision, (p) => {
+      precision = p;
+      save('calcPrec', p);
+      render();
+    });
+  });
+
+  // Hardware keyboard support.
+  document.addEventListener('keydown', (e) => {
+    if (document.querySelector('.app')?.getAttribute('data-tab') !== 'calc' || e.metaKey || e.ctrlKey) return;
+    const map: Record<string, string> = {
+      Enter: '=', '=': '=', Backspace: '⌫', Escape: 'AC', Delete: 'AC',
+      '*': '×', x: '×', '-': '−', '+': '+', ':': '÷', '(': '()', ')': '()', "'": "'", '"': '"',
+    };
+    let k = /^[\d.]$/.test(e.key) ? e.key : map[e.key];
+    // "/" types a fraction after a digit, otherwise divides.
+    if (e.key === '/') k = /\d$/.test(state.tokens[state.tokens.length - 1] ?? '') ? '/' : '÷';
+    if (!k) return;
+    e.preventDefault();
+    key(k);
+  });
+
+  window.addEventListener('resize', renderSeries);
+  document.addEventListener('tab:change', renderSeries);
+  render();
+</script>

@@ -1,0 +1,71 @@
+---
+import App from '../layouts/App.astro';
+import Conversion from '../components/Conversion.astro';
+import Calculator from '../components/Calculator.astro';
+import { PRECISIONS } from '../lib/units';
+---
+
+<App title="Unit">
+  <main class="app" data-tab="convert">
+    <div class="tabs" role="tablist">
+      <div class="tabs-thumb"></div>
+      <button class="tab" role="tab" data-tab="convert" aria-selected="true" aria-controls="screen-convert">Convert</button>
+      <button class="tab" role="tab" data-tab="calc" aria-selected="false" aria-controls="screen-calc">Calculate</button>
+    </div>
+
+    <div class="viewport">
+      <div class="track">
+        <Conversion />
+        <Calculator />
+      </div>
+    </div>
+  </main>
+
+  <div class="sheet-scrim"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" aria-hidden="true">
+    <div class="sheet-grip"></div>
+    <h2 id="sheet-title">Precision</h2>
+    <p>Fractions round to the nearest step, always shown in their simplest form.</p>
+    <div class="prec-grid" role="radiogroup">
+      {PRECISIONS.map((p) => (
+        <button class="prec-opt" role="radio" data-p={p} aria-checked="false">
+          <span class="fr">1/{p}</span>
+        </button>
+      ))}
+    </div>
+  </div>
+</App>
+
+<script>
+  import { haptic, shared, load, save, initPrecisionSheet, prettyHTML } from '../lib/ui';
+
+  const app = document.querySelector<HTMLElement>('.app')!;
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.tab');
+  const convTab = document.querySelector<HTMLButtonElement>('.tab[data-tab="convert"]')!;
+
+  function setTab(tab: string) {
+    app.dataset.tab = tab;
+    tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === tab)));
+    // While calculating, the Convert tab shows the last converted value as a peek.
+    const peek = shared.convPeek;
+    convTab.innerHTML = tab === 'calc' && peek ? `<span class="peek">${prettyHTML(peek)}</span>` : 'Convert';
+    save('tab', tab);
+    document.dispatchEvent(new CustomEvent('tab:change', { detail: tab }));
+  }
+
+  tabs.forEach((t) =>
+    t.addEventListener('click', () => {
+      if (app.dataset.tab === t.dataset.tab) return;
+      haptic();
+      setTab(t.dataset.tab!);
+    }),
+  );
+
+  initPrecisionSheet();
+  // Restore without animating.
+  app.querySelector<HTMLElement>('.track')!.style.transition = 'none';
+  setTab(load<string>('tab', 'convert') === 'calc' ? 'calc' : 'convert');
+  // Once every screen script has run, refresh so the peek is filled in.
+  document.addEventListener('DOMContentLoaded', () => setTab(app.dataset.tab!));
+  requestAnimationFrame(() => requestAnimationFrame(() => (app.querySelector<HTMLElement>('.track')!.style.transition = '')));
+</script>

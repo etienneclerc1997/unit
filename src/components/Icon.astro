@@ -1,0 +1,26 @@
+---
+interface Props {
+  name: 'backspace' | 'chevron' | 'minus' | 'plus' | 'swap';
+}
+const { name } = Astro.props;
+---
+
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  {name === 'backspace' && (
+    <>
+      <path d="M9 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6-7z" />
+      <path d="m12.5 9.5 5 5m0-5-5 5" />
+    </>
+  )}
+  {name === 'chevron' && <path d="m6 9 6 6 6-6" stroke-width="2.5" />}
+  {name === 'minus' && <path d="M5 12h14" stroke-width="2" />}
+  {name === 'plus' && <path d="M12 5v14M5 12h14" stroke-width="2" />}
+  {name === 'swap' && (
+    <>
+      <path d="M7 4 3 8l4 4" />
+      <path d="M3 8h14" />
+      <path d="m17 20 4-4-4-4" />
+      <path d="M21 16H7" />
+    </>
+  )}
+</svg>
