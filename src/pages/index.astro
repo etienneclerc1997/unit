@@ -59,6 +59,10 @@ import { PRECISIONS } from '../lib/units';
   const screens = track.querySelectorAll<HTMLElement>('.screen');
   const convLabel = document.querySelector<HTMLElement>('.tab[data-tab="convert"] .tab-label')!;
   const index = () => Math.max(0, TABS.indexOf(app.dataset.tab!));
+  const CALC = TABS.indexOf('calc');
+
+  // How far the calculator keypad has morphed from Convert's (0) to its own (1).
+  const setCalcPose = (p: number) => app.style.setProperty('--calc-p', p.toFixed(3));
 
   function setTab(tab: string) {
     const i = Math.max(0, TABS.indexOf(tab));
@@ -66,6 +70,7 @@ import { PRECISIONS } from '../lib/units';
     app.style.setProperty('--i', String(i));
     tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === TABS[i])));
     screens.forEach((s, n) => s.classList.toggle('active', n === i));
+    setCalcPose(i === CALC ? 1 : 0);
     // Away from Convert, its tab peeks at the last converted value.
     convLabel.innerHTML = i > 0 && shared.convPeek ? shared.convPeek : 'Convert';
     save('tab', TABS[i]);
@@ -111,6 +116,8 @@ import { PRECISIONS } from '../lib/units';
     if (x > 0) x /= 4;
     if (x < min) x = min + (x - min) / 4;
     track.style.transform = `translateX(${x}px)`;
+    // The keypad morphs with the finger, by how centered the calculator is.
+    setCalcPose(Math.max(0, 1 - Math.abs(x + w * CALC) / w));
   });
 
   const endSwipe = (e: PointerEvent) => {
@@ -131,7 +138,7 @@ import { PRECISIONS } from '../lib/units';
     if (go && next >= 0 && next < TABS.length) {
       haptic();
       setTab(TABS[next]);
-    }
+    } else setCalcPose(index() === CALC ? 1 : 0);
   };
   viewport.addEventListener('pointerup', endSwipe);
   viewport.addEventListener('pointercancel', endSwipe);
@@ -150,9 +157,9 @@ import { PRECISIONS } from '../lib/units';
 
   initPrecisionSheet();
   // Restore without animating.
-  track.style.transition = 'none';
+  track.style.transition = app.style.transition = 'none';
   setTab(load<string>('tab', 'convert'));
-  requestAnimationFrame(() => requestAnimationFrame(() => (track.style.transition = '')));
+  requestAnimationFrame(() => requestAnimationFrame(() => (track.style.transition = app.style.transition = '')));
   // Once every screen script has run, refresh so the peek is filled in (and the level starts).
   document.addEventListener('DOMContentLoaded', () => setTab(app.dataset.tab!));
 </script>

@@ -26,7 +26,7 @@ import FoldHint from './FoldHint.astro';
     <FoldHint label="Out over" />
   </div>
 
-  <div class="fold-more">
+  <div class="fold-more lvl-more">
     <div class="lvl-offset">
       <div class="offset-head">
         <span class="caps">Out over</span>
@@ -58,8 +58,6 @@ import FoldHint from './FoldHint.astro';
   const SVG = 'http://www.w3.org/2000/svg';
 
   const screen = $('screen-level');
-  const card = $('lvl-card');
-  const face = $('lvl-face');
   const odometer = new Odometer($('lvl-angle'), 2); // degrees off, never past 45
   const modeEl = $('lvl-mode');
   const devEl = $('lvl-dev');
@@ -159,80 +157,134 @@ import FoldHint from './FoldHint.astro';
     const delta = ((((q - quarter) * 90 + 540) % 360) - 180) as number;
     turn += delta;
     quarter = q;
-    card.style.setProperty('--turn', `${turn}deg`);
+    screen.style.setProperty('--turn', `${turn}deg`);
   }
 
   /* ---------- Out over chart ----------
-     Distance runs down a long line (0 to 8′); how far out of level the line
-     gets is the horizontal bar at 1′, 2′, 4′ and 8′. The offset scale is fixed
-     and logarithmic (0 to 12″), so the shape never jumps to a new range: a
-     small error still shows, and a big one fills the scale. */
+     A view of the line the phone sits on, drawn along the phone's long side.
+     On an edge it's seen from the side: the true plumb/level line runs down the
+     middle and the real line drifts off it, with a bar at 1′, 2′, 4′ and 8′.
+     Lying flat it's seen from above: the line points to the low side. The
+     offset scale is fixed and linear (±2″), so nothing rescales or bends;
+     anything past it runs off the edge, and the values still read true. */
 
   const chart = $('chart') as unknown as SVGSVGElement;
-  const CH = 300;
   const DISTS: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'], [96, '8′']];
-  const MAX_OFF = 12;
-  const KNEE = 1 / 32; // linear below this, logarithmic above, so 0 sits on the axis
-  const OFF_TICKS: [number, boolean][] = [
-    [1 / 16, true], [1 / 8, false], [1 / 4, true], [1 / 2, false], [1, true], [2, false], [4, true], [8, false], [12, true],
-  ];
+  const CAP = 2; // inches either side of the middle
   let W = 340;
-  const X0 = 46;
+  let H = 480;
   const Y0 = 40;
-  const Y1 = CH - 16;
-  const xMax = () => W - 104; // room right of the bars for their values
-  const yAt = (inches: number) => Y0 + (inches / 96) * (Y1 - Y0);
-  const logOff = (inches: number) => Math.log1p(Math.min(MAX_OFF, inches) / KNEE) / Math.log1p(MAX_OFF / KNEE);
-  const xOf = (inches: number) => X0 + logOff(inches) * (xMax() - X0);
+  const y1 = () => H - 40; // room for a value label turned on its side
+  const px0 = 44; // left column: distances
+  const px1 = () => W - 84; // right column: values
+  const cx = () => (px0 + px1()) / 2;
+  const half = () => (px1() - px0) / 2;
+  const cy = () => (Y0 + y1()) / 2;
+  const yAt = (inches: number) => Y0 + (inches / 96) * (y1() - Y0);
+  const sx = (offset: number) => (Math.max(-1.08, Math.min(1.08, offset / CAP)) * half());
 
   const axisG = el('g', {}, chart);
-  const slope = el('path', { class: 'slope' }, chart);
+  const clip = el('clipPath', { id: 'chart-clip' }, chart);
+  const clipRect = el('rect', {}, clip);
+  const plot = el('g', { 'clip-path': 'url(#chart-clip)' }, chart);
+  const sideG = el('g', {}, plot);
+  const topG = el('g', {}, plot);
+  const line = el('line', { class: 'slope' }, plot);
+  const marks = el('g', {}, plot);
   const bars = DISTS.map(([d]) => ({
     d,
-    bar: el('line', { class: 'bar', y1: yAt(d), y2: yAt(d), x1: X0 }, chart),
-    label: el('text', { class: 'bar-val fr', y: yAt(d) }, chart),
+    bar: el('line', { class: 'bar' }, marks),
+    dot: el('circle', { class: 'bar-dot', r: 2.5 }, marks),
+    label: el('text', { class: 'bar-val fr' }, chart),
     steps: null as number | null,
   }));
 
   function drawAxis() {
     axisG.replaceChildren();
-    el('line', { x1: X0, y1: Y0, x2: X0, y2: Y1, class: 'axis' }, axisG);
-    for (let f = 0; f <= 8; f++) {
-      const y = yAt(f * 12);
-      const major = [1, 2, 4, 8].includes(f);
-      el('line', { x1: X0 - (major ? 10 : 5), y1: y, x2: X0, y2: y, class: 'tk' }, axisG);
-      if (major) el('text', { x: X0 - 16, y, class: 'dist-l' }, axisG, `${f}′`);
+    sideG.replaceChildren();
+    topG.replaceChildren();
+    const x = cx();
+    clipRect.setAttribute('x', String(px0 - 4));
+    clipRect.setAttribute('y', String(Y0 - 2));
+    clipRect.setAttribute('width', String(px1() - px0 + 8));
+    clipRect.setAttribute('height', String(y1() - Y0 + 4));
+
+    // Offset scale along the top, both ways from the middle (no negatives: it's a distance off).
+    el('line', { x1: px0, y1: Y0, x2: px1(), y2: Y0, class: 'base' }, axisG);
+    for (let v = -CAP; v <= CAP; v += 0.5) {
+      const labeled = v !== 0 && Number.isInteger(v);
+      el('line', { x1: x + sx(v), y1: Y0, x2: x + sx(v), y2: Y0 - (v === 0 || labeled ? 8 : 5), class: 'tk' }, axisG);
+      if (labeled) el('text', { x: x + sx(v), y: Y0 - 18, class: 'tl' }, axisG, `${Math.abs(v)}″`);
     }
-    el('line', { x1: X0, y1: Y0, x2: xMax(), y2: Y0, class: 'base' }, axisG);
-    // Offset scale along the top, in inches.
-    for (const [v, labeled] of OFF_TICKS) {
-      const x = xOf(v);
-      el('line', { x1: x, y1: Y0, x2: x, y2: Y0 - (labeled ? 8 : 5), class: 'tk' }, axisG);
-      if (labeled) el('text', { x, y: Y0 - 18, class: 'tl fr' }, axisG, fractionText(toFraction(v, 64)) + '″');
+    // Distance and value columns.
+    for (const b of bars) {
+      el('text', { x: px0 / 2, y: yAt(b.d), class: 'dist-l' }, axisG, DISTS.find(([d]) => d === b.d)![1]);
+      b.label.setAttribute('x', String((px1() + W) / 2));
+      b.label.setAttribute('y', String(yAt(b.d)));
     }
+
+    // Side view: the true line down the middle, marked every foot.
+    el('line', { x1: x, y1: Y0, x2: x, y2: y1(), class: 'axis' }, sideG);
+    for (let f = 1; f <= 8; f++) {
+      const len = [1, 2, 4, 8].includes(f) ? 6 : 3;
+      el('line', { x1: x - len, y1: yAt(f * 12), x2: x + len, y2: yAt(f * 12), class: 'tk' }, sideG);
+    }
+    // Top view: crosshair and rings at 1″ and 2″ around the phone.
+    el('line', { x1: px0, y1: cy(), x2: px1(), y2: cy(), class: 'base' }, topG);
+    el('line', { x1: x, y1: cy() - half(), x2: x, y2: cy() + half(), class: 'base' }, topG);
+    for (const v of [1, 2]) el('circle', { cx: x, cy: cy(), r: sx(v), class: 'ring' }, topG);
+    el('circle', { cx: x, cy: cy(), r: 3, class: 'center' }, topG);
   }
 
   function sizeChart() {
     W = chart.clientWidth || 340;
-    chart.setAttribute('viewBox', `0 0 ${W} ${CH}`);
+    H = chart.clientHeight || 480;
+    chart.setAttribute('viewBox', `0 0 ${W} ${H}`);
     drawAxis();
   }
 
-  /** Lay the chart out for a deviation; called every frame with the slow reading. */
-  function layoutChart(dev: number) {
-    const t = Math.abs(Math.tan((dev * Math.PI) / 180));
-    for (const b of bars) {
-      const x = xOf(t * b.d);
-      b.bar.setAttribute('x2', String(x));
-      b.label.setAttribute('x', String(x + 8));
+  const tan = (deg: number) => Math.tan((deg * Math.PI) / 180);
+
+  /**
+   * Lay the chart out; called every frame with the slow reading. Edge: `a` is the
+   * deviation. Flat: `a`/`b` are the tilts across/along the screen.
+   */
+  function layoutChart(flat: boolean, a: number, b: number) {
+    sideG.toggleAttribute('hidden', flat);
+    topG.toggleAttribute('hidden', !flat);
+    const x = cx();
+    if (!flat) {
+      // Tilting the phone counter-clockwise swings the far end to screen-right.
+      const t = tan(a);
+      line.setAttribute('x1', String(x));
+      line.setAttribute('y1', String(Y0));
+      line.setAttribute('x2', String(x + sx(t * 96)));
+      line.setAttribute('y2', String(y1()));
+      for (const m of bars) {
+        const bx = x + sx(t * m.d);
+        const y = yAt(m.d);
+        for (const [k, v] of [['x1', x], ['y1', y], ['x2', bx], ['y2', y]] as const) m.bar.setAttribute(k, String(v));
+        m.dot.setAttribute('cx', String(bx));
+        m.dot.setAttribute('cy', String(y));
+      }
+      return;
     }
-    // On a log scale the straight line becomes a curve: trace it down the distance.
-    let d = '';
-    for (let i = 0; i <= 48; i++) {
-      const inches = (i / 48) * 96;
-      d += `${i ? 'L' : 'M'}${xOf(t * inches).toFixed(1)} ${yAt(inches).toFixed(1)}`;
+    // Seen from above, the drop points downhill: away from the raised side (screen y points down).
+    const ux = -tan(a);
+    const uy = tan(b);
+    const y = cy();
+    line.setAttribute('x1', String(x));
+    line.setAttribute('y1', String(y));
+    line.setAttribute('x2', String(x + sx(ux * 96)));
+    line.setAttribute('y2', String(y + sx(uy * 96)));
+    for (const m of bars) {
+      m.bar.setAttribute('x1', String(x));
+      m.bar.setAttribute('x2', String(x));
+      m.bar.setAttribute('y1', String(y));
+      m.bar.setAttribute('y2', String(y));
+      m.dot.setAttribute('cx', String(x + sx(ux * m.d)));
+      m.dot.setAttribute('cy', String(y + sx(uy * m.d)));
     }
-    slope.setAttribute('d', d);
   }
 
   /** Label text, refreshed on a slow clock with hysteresis. */
@@ -354,9 +406,16 @@ import FoldHint from './FoldHint.astro';
   // "Out over" runs on a slower clock: a heavier filter for the drawing, and
   // labels that show the average over each second.
   const SLOW_TAU = 0.6;
-  let slowDev: number | null = null;
+  const SLACK = 0.02; // degrees the drawing ignores, like play in a joint
+  let slow: { a: number; b: number } | null = null;
+  let drawn = { a: 0, b: 0 };
   let slowRef = '';
+  let labelDev = 0;
   const win = { sum: 0, n: 0, at: 0 };
+
+  /** Follows `target` only once it's more than SLACK away, so resting flicker never shows. */
+  const slack = (held: number, target: number) =>
+    Math.abs(target - held) <= SLACK ? held : target - Math.sign(target - held) * SLACK;
 
   const deg = (v: number) => `${Math.abs(v).toFixed(2)}°`;
 
@@ -376,7 +435,15 @@ import FoldHint from './FoldHint.astro';
   function updateText(r: Reading, now: number) {
     if (now - lastText < 160) return;
     lastText = now;
-    const moved = shown ? Math.abs(r.angle - shown.angle) : Infinity;
+    // Any shown value counts: the angle, but also the lean or a flat tilt alone.
+    const moved = shown
+      ? Math.max(
+          Math.abs(r.angle - shown.angle),
+          Math.abs(r.lean - shown.lean),
+          Math.abs(r.tiltX - shown.tiltX),
+          Math.abs(r.tiltY - shown.tiltY),
+        )
+      : Infinity;
     const changedMode = shown && (shown.mode !== r.mode || shown.angle > 45 !== r.angle > 45);
     // Small drifts still land eventually, just not every frame.
     if (moved >= 0.015 || changedMode || (moved >= 0.005 && now - lastShownAt > 1000)) {
@@ -386,20 +453,30 @@ import FoldHint from './FoldHint.astro';
     }
   }
 
-  function updateOutOver(dev: number, ref: string, dt: number, now: number) {
+  function updateOutOver(r: Reading, ref: string, dt: number, now: number) {
+    const flat = r.mode === 'flat';
+    const a = flat ? r.tiltX : r.deviation;
+    const b = flat ? r.tiltY : 0;
     // Snap only when switching level ↔ plumb ↔ flat; any other movement glides.
-    if (slowDev === null || ref !== slowRef) {
-      slowDev = dev;
+    if (!slow || ref !== slowRef) {
+      slow = { a, b };
+      drawn = { a, b };
       slowRef = ref;
       win.sum = 0;
       win.n = 0;
-    } else slowDev += (dev - slowDev) * (1 - Math.exp(-dt / SLOW_TAU));
-    layoutChart(slowDev);
+    } else {
+      const k = 1 - Math.exp(-dt / SLOW_TAU);
+      slow.a += (a - slow.a) * k;
+      slow.b += (b - slow.b) * k;
+      drawn = { a: slack(drawn.a, slow.a), b: slack(drawn.b, slow.b) };
+    }
+    layoutChart(flat, drawn.a, drawn.b);
 
-    win.sum += dev;
+    win.sum += r.deviation;
     win.n++;
     if (now - win.at >= 1000) {
-      labelChart(win.sum / win.n, bars[0].steps === null);
+      labelDev = win.sum / win.n;
+      labelChart(labelDev, bars[0].steps === null);
       win.at = now;
       win.sum = 0;
       win.n = 0;
@@ -428,7 +505,7 @@ import FoldHint from './FoldHint.astro';
     setDial(dialX, x, dt);
     setDial(dialY, y, dt);
 
-    updateOutOver(r.deviation, ref(r), dt, now);
+    updateOutOver(r, ref(r), dt, now);
 
     const isLevel = Math.abs(r.deviation) < 0.05;
     if (isLevel !== wasLevel) {
@@ -481,14 +558,14 @@ import FoldHint from './FoldHint.astro';
       precision = p;
       save('levelPrec', p);
       renderPrec();
-      if (slowDev !== null) labelChart(slowDev, true);
+      labelChart(labelDev, true);
     });
   });
   renderPrec();
   odometer.set(0);
   sizeDials();
   sizeChart();
-  layoutChart(0);
+  layoutChart(false, 0, 0);
   labelChart(0, true);
 
   window.addEventListener('resize', () => {

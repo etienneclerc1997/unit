@@ -577,18 +577,65 @@ button:focus-visible {
   grid-template-rows: repeat(5, var(--key-h));
 }
 
-/* The calculator has one more row on top and = below; Convert leaves room
-   for the = row so the digits sit in the same place on both screens. */
-.calc-keys {
-  grid-template-rows: repeat(7, var(--key-h));
+/* The calculator has one more row on top and = below. --calc-p (0 on Convert,
+   1 on Calculate, following the finger mid-swipe) morphs it: at 0 its digits
+   sit exactly where Convert's do and the extra keys are gone; going to 1 the
+   keypad slides up, = rises in under it and the rows above fade in. */
+@property --calc-p {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
 }
 
-.conv-keys {
-  margin-bottom: calc(var(--key-h) + var(--key-gap));
+.app {
+  transition: --calc-p 0.5s var(--ease);
+}
+
+.app.swiping {
+  transition: none;
+}
+
+.calc-keys {
+  --row: calc(var(--key-h) + var(--key-gap));
+  grid-template-rows: repeat(7, var(--key-h));
+  transform: translateY(calc((1 - var(--calc-p)) * var(--row)));
+}
+
+/* `translate`/`scale` rather than `transform`, so the press effect still works;
+   opacity and translate follow --calc-p directly, without their own easing. */
+.calc-keys .key {
+  transition:
+    background-color 0.2s ease,
+    transform 0.2s var(--ease);
 }
 
 .calc-keys .key.eq {
   grid-column: 1 / -1;
+  opacity: clamp(0, var(--calc-p) * 1.6 - 0.4, 1);
+  translate: 0 calc((1 - var(--calc-p)) * 0.6 * var(--row));
+  scale: calc(0.9 + 0.1 * var(--calc-p));
+}
+
+/* Operators fade in first, then the unit row above them. */
+.calc-keys .key.op {
+  opacity: clamp(0, var(--calc-p) * 1.6 - 0.3, 1);
+  translate: 0 calc((1 - var(--calc-p)) * 10px);
+}
+
+.calc-keys > .key:nth-child(-n + 4) {
+  opacity: clamp(0, var(--calc-p) * 2 - 1, 1);
+  translate: 0 calc((1 - var(--calc-p)) * 16px);
+}
+
+/* The ⌃ under = waits until = has settled. */
+#screen-calc:not(.scrolled) .fold-hint {
+  opacity: clamp(0, var(--calc-p) * 3 - 2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app {
+    transition: none;
+  }
 }
 
 .keypad .key {
@@ -1016,8 +1063,11 @@ button:focus-visible {
 
 /* One face for every orientation: readout in the middle, a vernier dial along
    the bottom and one down the right. --turn rotates only the text. */
-.lvl-card {
+#screen-level {
   --turn: 0deg;
+}
+
+.lvl-card {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
@@ -1183,10 +1233,52 @@ svg .index {
   white-space: nowrap;
 }
 
+/* Out over gets a whole page, so the distance runs along the long side. */
+.lvl-more {
+  height: 100%;
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.lvl-more .lvl-offset {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 #chart {
   display: block;
   width: 100%;
-  height: 300px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Labels turn with the phone, like the level's. */
+#chart text {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: rotate(var(--turn));
+  transition: transform 0.6s var(--ease);
+}
+
+#chart [hidden] {
+  display: none;
+}
+
+#chart .ring {
+  fill: none;
+  stroke: var(--hairline);
+  stroke-dasharray: 2 3;
+}
+
+#chart .center {
+  fill: var(--ink);
+}
+
+#chart .bar-dot {
+  fill: var(--orange);
 }
 
 #chart .axis {
@@ -1198,7 +1290,7 @@ svg .index {
   font-size: 13px;
   font-weight: 500;
   fill: var(--ink);
-  text-anchor: end;
+  text-anchor: middle;
   dominant-baseline: middle;
 }
 
@@ -1210,8 +1302,7 @@ svg .index {
 #chart .slope {
   fill: none;
   stroke: var(--orange);
-  stroke-linejoin: round;
-  stroke-width: 1.5;
+  stroke-width: 2;
   stroke-linecap: round;
 }
 
@@ -1219,6 +1310,7 @@ svg .index {
   font-size: 14px;
   font-weight: 500;
   fill: var(--ink);
+  text-anchor: middle;
   dominant-baseline: middle;
 }
 
