@@ -842,10 +842,10 @@ button:focus-visible {
 
 .lvl-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 4px 0;
+  padding: 0 4px;
 }
 
 .lvl-meta {
@@ -881,35 +881,79 @@ button:focus-visible {
   box-shadow: 0 0 0 3px rgba(255, 84, 23, 0.18);
 }
 
-.lvl-angle {
-  margin-top: 2px;
-  font-size: 64px;
+/* ---------- Rolling-digit readout ---------- */
+
+.odo {
+  --row: 1.08em;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
   font-weight: 300;
-  letter-spacing: -2.5px;
-  line-height: 1;
+  line-height: var(--row);
   white-space: nowrap;
 }
 
-.lvl-angle .lead {
+.odo-wheel {
+  display: inline-block;
+  height: var(--row);
+  overflow: hidden;
+  /* A drum: digits fade as they roll over the edge. */
+  mask-image: linear-gradient(transparent 0, #000 18%, #000 82%, transparent 100%);
+}
+
+.odo-strip {
+  display: block;
+  transform: translateY(calc(var(--p, 10) * var(--row) * -1));
+  transition: transform 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.odo-strip > span {
+  display: block;
+  height: var(--row);
+  text-align: center;
+}
+
+.odo-lead {
   color: #d2cfcb;
 }
 
-.lvl-angle .hund {
+.odo-last {
   color: var(--muted-soft);
 }
 
-.lvl-angle .deg {
-  margin-left: 2px;
+.odo-sign {
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width 0.3s var(--ease), opacity 0.3s ease;
+}
+
+.odo-sign.on {
+  max-width: 0.6em;
+  opacity: 1;
+}
+
+.odo-unit {
+  margin-left: 0.04em;
+  font-size: 0.5em;
+  line-height: 1.4;
   color: var(--muted);
-  font-size: 0.6em;
-  vertical-align: 0.5em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .odo-strip {
+    transition: none;
+  }
+}
+
+.lvl-angle {
+  font-size: clamp(60px, 21vw, 92px);
+  letter-spacing: -3px;
 }
 
 .lvl-actions {
   display: flex;
-  flex-direction: column;
   gap: 6px;
-  padding-bottom: 6px;
 }
 
 .pill-btn {
@@ -926,6 +970,12 @@ button:focus-visible {
 .pill-btn:active {
   transform: scale(0.95);
   background: var(--ink);
+}
+
+.pill-btn.small {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
 }
 
 .pill-btn.quiet {
@@ -945,11 +995,23 @@ button:focus-visible {
   overflow: hidden;
 }
 
+/* Dial on top; the angle sits centered in the space below (with the bullseye when flat). */
 .lvl-dial {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  padding-bottom: 16px;
+}
+
+.lvl-dial .lvl-angle {
+  margin: auto 0;
+}
+
+.screen[data-mode='flat'] .lvl-dial .lvl-angle {
+  margin-bottom: 12px;
+  font-size: clamp(52px, 16vw, 72px);
 }
 
 .lvl-dial > svg,
@@ -1012,72 +1074,39 @@ svg .index {
   stroke-linecap: round;
 }
 
-.vial-wrap {
-  flex: 1;
-  min-height: 96px;
-  display: grid;
-  place-items: center;
-}
-
-.vial,
+/* Flat mode only: a bullseye where the bubble floats to the high side. */
 .bullseye {
-  grid-area: 1 / 1;
   position: relative;
-  transition: opacity 0.3s ease, transform 0.4s var(--ease);
-}
-
-.vial {
-  width: 224px;
-  height: 36px;
-  border-radius: var(--pill);
+  flex-shrink: 0;
+  width: 140px;
+  height: 140px;
+  margin-bottom: auto;
+  border-radius: 50%;
   background: var(--canvas);
   box-shadow: inset 0 0 0 1px var(--hairline);
+  animation: fade-in 0.35s ease both;
 }
 
-.vial.plumb {
-  transform: rotate(90deg) scale(0.8);
+.screen:not([data-mode='flat']) .bullseye {
+  display: none;
 }
 
-.vial-mark {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  width: 1.5px;
-  background: var(--ink);
-}
-
-.vial-mark.l {
-  left: calc(50% - 24px);
-}
-
-.vial-mark.r {
-  left: calc(50% + 23px);
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
 }
 
 .bubble {
   position: absolute;
-  border-radius: var(--pill);
+  border-radius: 50%;
   background: var(--ink);
   transition: background-color 0.15s ease;
 }
 
-.vial .bubble {
-  left: calc(50% - 20px);
-  top: 7px;
-  width: 40px;
-  height: 22px;
-}
-
 .is-level .bubble {
   background: var(--orange);
-}
-
-.bullseye {
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
-  background: var(--canvas);
-  box-shadow: inset 0 0 0 1px var(--hairline);
 }
 
 .bullseye .ring {
@@ -1132,12 +1161,6 @@ svg .index {
   height: 20px;
 }
 
-.screen[data-mode='flat'] .vial,
-.screen:not([data-mode='flat']) .bullseye {
-  opacity: 0;
-  pointer-events: none;
-}
-
 .lvl-offset {
   flex-shrink: 0;
   padding: 10px 10px 4px;
@@ -1182,9 +1205,16 @@ svg .index {
   color: var(--muted);
 }
 
+/* Only the selected distance updates live; the others are quieter. */
 .dist-value {
   font-size: 17px;
   white-space: nowrap;
+  color: var(--muted);
+  transition: color 0.2s ease;
+}
+
+.dist[aria-checked='true'] .dist-value {
+  color: inherit;
 }
 
 .dist[aria-checked='true'] {

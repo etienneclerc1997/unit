@@ -6,32 +6,24 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
 
 <section class="screen" id="screen-level" data-screen="level" aria-label="Level">
   <div class="lvl-head">
-    <div class="lvl-read">
-      <div class="lvl-meta">
-        <span class="lamp" id="lvl-lamp"></span>
-        <span id="lvl-mode">Level</span>
-        <span class="lvl-dev" id="lvl-dev"></span>
-      </div>
-      <div class="lvl-angle" id="lvl-angle" aria-live="off"></div>
+    <div class="lvl-meta">
+      <span class="lamp"></span>
+      <span id="lvl-mode">Level</span>
+      <span class="lvl-dev" id="lvl-dev"></span>
     </div>
     <div class="lvl-actions">
-      <button class="pill-btn" id="lvl-zero" aria-label="Calibrate: make this position read level">Zero</button>
-      <button class="pill-btn quiet" id="lvl-reset" aria-label="Clear calibration">Reset</button>
+      <button class="pill-btn small" id="lvl-zero" aria-label="Calibrate: make this position read level">Zero</button>
+      <button class="pill-btn small quiet" id="lvl-reset" aria-label="Clear calibration">Reset</button>
     </div>
   </div>
 
   <div class="lvl-dial">
-    <svg id="dial" viewBox="36 4 288 104" aria-hidden="true"></svg>
-    <div class="vial-wrap">
-      <div class="vial" id="vial">
-        <span class="vial-mark l"></span><span class="vial-mark r"></span>
-        <span class="bubble" id="vial-bubble"></span>
-      </div>
-      <div class="bullseye" id="bullseye">
-        <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
-        <span class="cross h"></span><span class="cross v"></span>
-        <span class="bubble" id="bull-bubble"></span>
-      </div>
+    <svg id="dial" viewBox="50 8 260 96" aria-hidden="true"></svg>
+    <div class="lvl-angle" id="lvl-angle" aria-live="off"></div>
+    <div class="bullseye" aria-hidden="true">
+      <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
+      <span class="cross h"></span><span class="cross v"></span>
+      <span class="bubble" id="bull-bubble"></span>
     </div>
   </div>
 
@@ -66,20 +58,19 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     type Calibration, type LevelMode, type Reading, type Vec3,
   } from '../lib/level';
   import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel, inchHTML } from '../lib/ui';
+  import { Odometer } from '../lib/odometer';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
   const SVG = 'http://www.w3.org/2000/svg';
   const DEG = 180 / Math.PI;
 
   const screen = $('screen-level');
-  const angleEl = $('lvl-angle');
+  const odometer = new Odometer($('lvl-angle'));
   const modeEl = $('lvl-mode');
   const devEl = $('lvl-dev');
   const gate = $('lvl-gate');
   const gateText = $('lvl-gate-text');
   const enableBtn = $<HTMLButtonElement>('lvl-enable');
-  const vial = $('vial');
-  const vialBubble = $('vial-bubble');
   const bullBubble = $('bull-bubble');
   const precChip = $('lvl-prec');
   const dists = Array.from(document.querySelectorAll<HTMLButtonElement>('.dist'));
@@ -277,33 +268,62 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
 
   /* ---------- Rendering ---------- */
 
-  let lastText = 0;
   let wasLevel = false;
-  let reading: Reading | null = null;
+  /** The reading as shown in text: it only moves past a small deadband so digits don't twitch. */
+  let shown: Reading | null = null;
+  let lastText = 0;
+  let lastShownAt = 0;
+  // The other distances refresh only once the reading has settled.
+  let settleRef = Infinity;
+  let settledAt = 0;
+  let othersFresh = false;
 
-  function angleHTML(v: number): string {
-    const sign = v < -0.005 ? '−' : '';
-    const [int, dec] = Math.abs(v).toFixed(2).split('.');
-    const padded = int.padStart(3, '0');
-    const lead = padded.length - int.length;
-    return (
-      `<span class="sign">${sign}</span>` +
-      `<span class="lead">${padded.slice(0, lead)}</span>${int}.${dec[0]}<span class="hund">${dec[1]}</span><span class="deg">°</span>`
-    );
+  function distHTML(r: Reading, d: number) {
+    // Anything that rounds to zero reads as exactly zero (no ± mark from sensor noise).
+    const off = Math.abs(offsetAt(r.deviation, d));
+    return inchHTML(Math.round(off * precision) === 0 ? 0 : off, precision);
+  }
+
+  function renderDists(r: Reading, all: boolean) {
+    dists.forEach((b) => {
+      const d = Number(b.dataset.d);
+      const selected = d === distance;
+      b.setAttribute('aria-checked', String(selected));
+      if (selected || all) b.querySelector('.dist-value')!.innerHTML = distHTML(r, d);
+    });
   }
 
   function renderText(r: Reading) {
-    angleEl.innerHTML = angleHTML(r.angle);
-    const ref = r.mode === 'flat' ? 'Flat' : r.angle > 45 ? 'Plumb' : 'Level';
-    modeEl.textContent = ref;
+    odometer.set(r.angle);
+    modeEl.textContent = r.mode === 'flat' ? 'Flat' : r.angle > 45 ? 'Plumb' : 'Level';
     devEl.textContent = r.mode === 'flat' ? '' : `${Math.abs(r.deviation).toFixed(2)}° off`;
-    dists.forEach((b) => {
-      const d = Number(b.dataset.d);
-      // Anything that rounds to zero reads as exactly zero (no ± mark from sensor noise).
-      const off = Math.abs(offsetAt(r.deviation, d));
-      b.querySelector('.dist-value')!.innerHTML = inchHTML(Math.round(off * precision) === 0 ? 0 : off, precision);
-      b.setAttribute('aria-checked', String(d === distance));
-    });
+    renderDists(r, false);
+  }
+
+  /** Text updates at ~6 Hz, and only when the reading moved past the deadband. */
+  function updateText(r: Reading, now: number) {
+    if (now - lastText < 160) return;
+    lastText = now;
+    const moved = shown ? Math.abs(r.angle - shown.angle) : Infinity;
+    const changedMode = shown && (shown.mode !== r.mode || shown.angle > 45 !== r.angle > 45);
+    // While the phone is moving, the other distances hold still.
+    if (Math.abs(r.angle - settleRef) > 0.05) {
+      settleRef = r.angle;
+      settledAt = now;
+    }
+    const settled = now - settledAt > 700;
+
+    // Small drifts still land eventually, just not every frame.
+    if (moved >= 0.015 || changedMode || (moved >= 0.005 && now - lastShownAt > 1000)) {
+      shown = r;
+      lastShownAt = now;
+      renderText(r);
+      if (settled) renderDists(r, true);
+      othersFresh = settled;
+    } else if (settled && !othersFresh && shown) {
+      othersFresh = true;
+      renderDists(shown, true);
+    }
   }
 
   function renderFrame(now: number) {
@@ -312,7 +332,7 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     const g = filter.push(raw, (now - (lastSample || now)) / 1000);
     lastSample = now;
     mode = detectMode(g, mode);
-    const r = (reading = read(g, mode, cal));
+    const r = read(g, mode, cal);
 
     // Dial: turn the main scale so the reading sits under the index.
     mainScale.setAttribute('transform', `rotate(${-r.angle * U * DEG} ${CX} ${CY})`);
@@ -326,13 +346,9 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     const q = Math.round(((((off * 16) % 1) + 1) % 1) * 4) % 4;
     gaugeTicks.forEach((t, k) => t.classList.toggle('on', k === q && k > 0));
 
-    // Vials: the bubble floats to the high side.
+    // Flat: the bubble floats to the high side.
     screen.dataset.mode = r.mode;
-    if (r.mode === 'edge') {
-      vial.classList.toggle('plumb', r.angle > 45);
-      const x = Math.max(-1, Math.min(1, r.deviation / 4));
-      vialBubble.style.transform = `translateX(${x * 92}px)`;
-    } else {
+    if (r.mode === 'flat') {
       const s = 14; // px per degree
       let bx = r.tiltX * s;
       let by = -r.tiltY * s;
@@ -349,11 +365,7 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
       wasLevel = isLevel;
     }
 
-    // Numbers settle at ~8 Hz so they're readable.
-    if (now - lastText > 120) {
-      lastText = now;
-      renderText(r);
-    }
+    updateText(r, now);
   }
 
   function setActive(on: boolean) {
@@ -391,7 +403,8 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
       haptic();
       distance = Number(b.dataset.d);
       save('levelDist', distance);
-      if (reading) renderText(reading);
+      if (shown) renderDists(shown, true);
+      else dists.forEach((x) => x.setAttribute('aria-checked', String(x === b)));
     }),
   );
 
@@ -404,11 +417,11 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
       precision = p;
       save('levelPrec', p);
       renderPrec();
-      if (reading) renderText(reading);
+      if (shown) renderDists(shown, true);
     });
   });
   renderPrec();
-  angleEl.innerHTML = angleHTML(0);
+  odometer.set(0);
   dists.forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.d) === distance)));
 
   const isLevelTab = () => document.querySelector<HTMLElement>('.app')?.dataset.tab === 'level';
