@@ -6,7 +6,7 @@ import FoldHint from './FoldHint.astro';
 <section class="screen" id="screen-level" data-screen="level" aria-label="Level">
   <div class="fold-main">
     <div class="lvl-bar">
-      <button class="pill-btn small" id="lvl-zero" aria-label="Calibrate: make this position read level">Zero</button>
+      <button class="pill-btn small" id="lvl-zero" aria-label="Calibrate: make this position read zero">Zero</button>
       <button class="pill-btn small quiet" id="lvl-reset" aria-label="Clear calibration">Reset</button>
     </div>
 
@@ -15,9 +15,9 @@ import FoldHint from './FoldHint.astro';
     <div class="lvl-card" id="lvl-card">
       <div class="lvl-face-area">
         <div class="lvl-face" id="lvl-face">
-          <div class="lvl-meta"><span class="lamp"></span><span id="lvl-mode">Level</span></div>
+          <div class="lvl-meta"><span class="lamp"></span><span id="lvl-mode">Plumb</span></div>
           <div class="lvl-angle" id="lvl-angle" aria-live="off"></div>
-          <div class="lvl-dev" id="lvl-dev">0.00° off</div>
+          <div class="lvl-dev" id="lvl-dev">Lean 0.00°</div>
         </div>
       </div>
       <svg class="dial dial-y" id="dial-y" aria-hidden="true"></svg>
@@ -60,7 +60,7 @@ import FoldHint from './FoldHint.astro';
   const screen = $('screen-level');
   const card = $('lvl-card');
   const face = $('lvl-face');
-  const odometer = new Odometer($('lvl-angle'));
+  const odometer = new Odometer($('lvl-angle'), 2); // degrees off, never past 45
   const modeEl = $('lvl-mode');
   const devEl = $('lvl-dev');
   const gate = $('lvl-gate');
@@ -164,22 +164,29 @@ import FoldHint from './FoldHint.astro';
 
   /* ---------- Out over chart ----------
      Distance runs down a long line (0 to 8′); how far out of level the line
-     gets is the horizontal bar at 1′, 2′, 4′ and 8′. */
+     gets is the horizontal bar at 1′, 2′, 4′ and 8′. The offset scale is fixed
+     and logarithmic (0 to 12″), so the shape never jumps to a new range: a
+     small error still shows, and a big one fills the scale. */
 
   const chart = $('chart') as unknown as SVGSVGElement;
   const CH = 300;
   const DISTS: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'], [96, '8′']];
-  const RANGES = [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32, 64];
+  const MAX_OFF = 12;
+  const KNEE = 1 / 32; // linear below this, logarithmic above, so 0 sits on the axis
+  const OFF_TICKS: [number, boolean][] = [
+    [1 / 16, true], [1 / 8, false], [1 / 4, true], [1 / 2, false], [1, true], [2, false], [4, true], [8, false], [12, true],
+  ];
   let W = 340;
   const X0 = 46;
   const Y0 = 40;
   const Y1 = CH - 16;
   const xMax = () => W - 104; // room right of the bars for their values
   const yAt = (inches: number) => Y0 + (inches / 96) * (Y1 - Y0);
+  const logOff = (inches: number) => Math.log1p(Math.min(MAX_OFF, inches) / KNEE) / Math.log1p(MAX_OFF / KNEE);
+  const xOf = (inches: number) => X0 + logOff(inches) * (xMax() - X0);
 
   const axisG = el('g', {}, chart);
-  const rangeG = el('g', {}, chart);
-  const slope = el('line', { class: 'slope' }, chart);
+  const slope = el('path', { class: 'slope' }, chart);
   const bars = DISTS.map(([d]) => ({
     d,
     bar: el('line', { class: 'bar', y1: yAt(d), y2: yAt(d), x1: X0 }, chart),
@@ -196,24 +203,12 @@ import FoldHint from './FoldHint.astro';
       el('line', { x1: X0 - (major ? 10 : 5), y1: y, x2: X0, y2: y, class: 'tk' }, axisG);
       if (major) el('text', { x: X0 - 16, y, class: 'dist-l' }, axisG, `${f}′`);
     }
-    el('line', { x1: X0, y1: Y0, x2: W - 8, y2: Y0, class: 'base' }, axisG);
-  }
-
-  let range = 1 / 4;
-  let shownRange = range;
-  let drawnRange = -1;
-
-  function drawRange() {
-    if (Math.abs(shownRange - drawnRange) < 1e-6) return;
-    drawnRange = shownRange;
-    rangeG.replaceChildren();
-    // Four steps of the current range, labeled as fractions.
-    for (let i = 1; i <= 4; i++) {
-      const v = (range * i) / 4;
-      const x = X0 + (v / shownRange) * (xMax() - X0);
-      if (x > W - 8) continue;
-      el('line', { x1: x, y1: Y0, x2: x, y2: Y0 - (i === 4 ? 8 : 5), class: 'tk' }, rangeG);
-      el('text', { x, y: Y0 - 16, class: 'tl fr' }, rangeG, fractionText(toFraction(v, 64)) + '″');
+    el('line', { x1: X0, y1: Y0, x2: xMax(), y2: Y0, class: 'base' }, axisG);
+    // Offset scale along the top, in inches.
+    for (const [v, labeled] of OFF_TICKS) {
+      const x = xOf(v);
+      el('line', { x1: x, y1: Y0, x2: x, y2: Y0 - (labeled ? 8 : 5), class: 'tk' }, axisG);
+      if (labeled) el('text', { x, y: Y0 - 18, class: 'tl fr' }, axisG, fractionText(toFraction(v, 64)) + '″');
     }
   }
 
@@ -221,29 +216,23 @@ import FoldHint from './FoldHint.astro';
     W = chart.clientWidth || 340;
     chart.setAttribute('viewBox', `0 0 ${W} ${CH}`);
     drawAxis();
-    drawnRange = -1;
   }
 
-  /** Lay the chart out for an offset per foot; called every frame with the slow reading. */
-  function layoutChart(dev: number, dt: number) {
-    const per8 = Math.abs(offsetAt(dev, 96));
-    // Pick a range that fits the 8′ bar; shrink only once it's well inside.
-    const fit = RANGES.find((r) => per8 <= r * 0.9) ?? RANGES[RANGES.length - 1];
-    if (fit > range || per8 < range * 0.3) range = fit;
-    shownRange = Math.exp(Math.log(shownRange) + (Math.log(range) - Math.log(shownRange)) * (1 - Math.exp(-dt / 0.35)));
-    drawRange();
-
-    const span = xMax() - X0;
-    const xOf = (inches: number) => X0 + Math.min(1.08, inches / shownRange) * span;
+  /** Lay the chart out for a deviation; called every frame with the slow reading. */
+  function layoutChart(dev: number) {
+    const t = Math.abs(Math.tan((dev * Math.PI) / 180));
     for (const b of bars) {
-      const x = xOf(Math.abs(offsetAt(dev, b.d)));
+      const x = xOf(t * b.d);
       b.bar.setAttribute('x2', String(x));
       b.label.setAttribute('x', String(x + 8));
     }
-    slope.setAttribute('x1', String(X0));
-    slope.setAttribute('y1', String(Y0));
-    slope.setAttribute('x2', String(xOf(per8)));
-    slope.setAttribute('y2', String(yAt(96)));
+    // On a log scale the straight line becomes a curve: trace it down the distance.
+    let d = '';
+    for (let i = 0; i <= 48; i++) {
+      const inches = (i / 48) * 96;
+      d += `${i ? 'L' : 'M'}${xOf(t * inches).toFixed(1)} ${yAt(inches).toFixed(1)}`;
+    }
+    slope.setAttribute('d', d);
   }
 
   /** Label text, refreshed on a slow clock with hysteresis. */
@@ -369,10 +358,18 @@ import FoldHint from './FoldHint.astro';
   let slowRef = '';
   const win = { sum: 0, n: 0, at: 0 };
 
+  const deg = (v: number) => `${Math.abs(v).toFixed(2)}°`;
+
+  // The long side of the phone is the reference: upright it checks plumb,
+  // sideways it checks level. The number is how far off, 0 when true.
+  const ref = (r: Reading) => (r.mode === 'flat' ? 'flat' : r.angle > 45 ? 'level' : 'plumb');
+
   function renderText(r: Reading) {
-    odometer.set(r.angle);
-    modeEl.textContent = r.mode === 'flat' ? 'Flat' : r.angle > 45 ? 'Plumb' : 'Level';
-    devEl.textContent = `${Math.abs(r.deviation).toFixed(2)}° off`;
+    odometer.set(Math.abs(r.deviation));
+    modeEl.textContent = ref(r).replace(/^./, (c) => c.toUpperCase());
+    devEl.textContent = r.mode === 'flat'
+      ? `${deg(r.tiltX)} × ${deg(r.tiltY)}`
+      : `Lean ${deg(r.lean)}`;
   }
 
   /** Text updates at ~6 Hz, and only when the reading moved past the deadband. */
@@ -397,7 +394,7 @@ import FoldHint from './FoldHint.astro';
       win.sum = 0;
       win.n = 0;
     } else slowDev += (dev - slowDev) * (1 - Math.exp(-dt / SLOW_TAU));
-    layoutChart(slowDev, dt);
+    layoutChart(slowDev);
 
     win.sum += dev;
     win.n++;
@@ -431,8 +428,7 @@ import FoldHint from './FoldHint.astro';
     setDial(dialX, x, dt);
     setDial(dialY, y, dt);
 
-    const ref = r.mode === 'flat' ? 'flat' : r.angle > 45 ? 'plumb' : 'level';
-    updateOutOver(r.deviation, ref, dt, now);
+    updateOutOver(r.deviation, ref(r), dt, now);
 
     const isLevel = Math.abs(r.deviation) < 0.05;
     if (isLevel !== wasLevel) {
@@ -492,7 +488,7 @@ import FoldHint from './FoldHint.astro';
   odometer.set(0);
   sizeDials();
   sizeChart();
-  layoutChart(0, 1);
+  layoutChart(0);
   labelChart(0, true);
 
   window.addEventListener('resize', () => {

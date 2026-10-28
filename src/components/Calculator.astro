@@ -4,14 +4,16 @@ import Icon from './Icon.astro';
 import Denominators from './Denominators.astro';
 import FoldHint from './FoldHint.astro';
 
-// [label, key, style]. The 4×4 block on the left matches the Convert keypad
-// key for key; the top row and the operator column are calculator-only.
+// [label, key, style]. Four columns like the Convert keypad: the 4×4 block
+// matches it key for key, with units and operators above and = below.
 const keys: [string, string, string][] = [
-  ['(', '(', 'fn'], [')', ')', 'fn'], ['mm', 'mm', 'fn small-label'], ['cm', 'cm', 'fn small-label'], ['÷', '÷', 'op'],
-  ['7', '7', ''], ['8', '8', ''], ['9', '9', ''], ['⌫', '⌫', 'fn'], ['×', '×', 'op'],
-  ['4', '4', ''], ['5', '5', ''], ['6', '6', ''], ['/', '/', ''], ['−', '−', 'op'],
-  ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['space', ' ', 'small-label'], ['+', '+', 'op'],
-  ['C', 'AC', 'fn'], ['0', '0', ''], ['.', '.', ''], ['ft ′', "'", 'small-label'], ['=', '=', 'eq'],
+  ['(', '(', 'fn'], [')', ')', 'fn'], ['mm', 'mm', 'fn small-label'], ['cm', 'cm', 'fn small-label'],
+  ['÷', '÷', 'op'], ['×', '×', 'op'], ['−', '−', 'op'], ['+', '+', 'op'],
+  ['7', '7', ''], ['8', '8', ''], ['9', '9', ''], ['⌫', '⌫', 'fn'],
+  ['4', '4', ''], ['5', '5', ''], ['6', '6', ''], ['/', '/', ''],
+  ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['space', ' ', 'small-label'],
+  ['C', 'AC', 'fn'], ['0', '0', ''], ['.', '.', ''], ['ft ′', "'", 'small-label'],
+  ['=', '=', 'eq'],
 ];
 const labels: Record<string, string> = {
   '(': 'Open parenthesis', ')': 'Close parenthesis', '/': 'Fraction', '÷': 'Divide', '×': 'Multiply', '−': 'Minus',
