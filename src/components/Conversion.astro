@@ -15,13 +15,9 @@ const keys: [string, string, string][] = [
   <div class="fields">
     {FIELDS.map((f) => (
       <div class="field-wrap">
-        <button class="field" data-key={f.key} aria-pressed="false" data-fresh="true">
+        <button class="field" data-key={f.key} aria-pressed="false" aria-label={f.label}>
           <span class="field-label">{f.label}</span>
-          <span class="field-value">
-            <span class="field-text"></span>
-            <span class="caret"></span>
-            {f.unit && <span class="field-unit">{f.unit === '"' ? '″' : f.unit}</span>}
-          </span>
+          <span class="field-value"></span>
         </button>
         {f.key === 'inFrac' && (
           <button class="chip" id="conv-prec" aria-label="Fraction precision">
@@ -51,11 +47,15 @@ const keys: [string, string, string][] = [
 </section>
 
 <script>
-  import { FIELDS, type FieldKey, formatInchFraction } from '../lib/units';
-  import { haptic, shared, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel, onLongPress } from '../lib/ui';
+  import { FIELDS, type FieldDef, type FieldKey } from '../lib/units';
+  import {
+    haptic, shared, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel,
+    onLongPress, roundHTML, inchHTML,
+  } from '../lib/ui';
 
   const fieldEls = new Map<FieldKey, HTMLButtonElement>();
   document.querySelectorAll<HTMLButtonElement>('.field').forEach((el) => fieldEls.set(el.dataset.key as FieldKey, el));
+  const defOf = (key: FieldKey) => FIELDS.find((f) => f.key === key)!;
 
   interface ConvState {
     active: FieldKey;
@@ -70,8 +70,37 @@ const keys: [string, string, string][] = [
   const precChip = document.getElementById('conv-prec')!;
   const hint = document.getElementById('conv-hint')!;
 
-  function setSize(el: HTMLElement, len: number) {
-    el.dataset.size = len > 11 ? 's' : len > 8 ? 'm' : '';
+  /* ---------- Rendering ---------- */
+
+  const unitHTML = (u: string) => `<span class="field-unit">${u}</span>`;
+  const CARET = '<span class="caret"></span>';
+  const PLACEHOLDER = '<span class="ph">0</span>';
+
+  /** Feet are typed as `5'3 1/2`: ′ is always shown, ″ once the inches part has started. */
+  function feetHTML(text: string, caret: string, active: boolean): string {
+    const t = text.replace(/"$/, '').replace("' ", "'");
+    const i = t.indexOf("'");
+    if (i < 0) return (t ? prettyHTML(t) : '') + caret + (t ? '' : PLACEHOLDER) + unitHTML('′');
+    const inch = t.slice(i + 1);
+    const showInch = inch !== '' || active;
+    return (
+      prettyHTML(t.slice(0, i)) + unitHTML('′') +
+      (showInch ? '&ensp;' + prettyHTML(inch) + caret + unitHTML('″') : caret)
+    );
+  }
+
+  function fieldHTML(f: FieldDef, text: string, active: boolean): string {
+    const caret = active && !fresh ? CARET : '';
+    let html: string;
+    if (f.key === 'ftFrac') html = feetHTML(text, caret, active);
+    else {
+      const unit = f.unit === '"' ? '″' : f.unit;
+      html = (text ? prettyHTML(text) + caret : caret + PLACEHOLDER) + (unit ? unitHTML(unit) : '');
+    }
+    if (active && fresh && text) html = `<span class="sel">${html}</span>`;
+    // Mark rounding on values we formatted (not on what's being typed).
+    if (f.dir && state.inches !== null && (!active || fresh)) html += roundHTML(f.dir(state.inches, precision));
+    return html;
   }
 
   function render() {
@@ -79,40 +108,43 @@ const keys: [string, string, string][] = [
       const el = fieldEls.get(f.key)!;
       const isActive = f.key === state.active;
       const text = isActive ? state.text : state.inches === null ? '' : f.format(state.inches, precision);
-      const out = el.querySelector<HTMLElement>('.field-text')!;
-      out.innerHTML = prettyHTML(text);
-      setSize(el.querySelector('.field-value')!, text.length + (f.unit.length > 1 ? 1 : 0));
+      const value = el.querySelector<HTMLElement>('.field-value')!;
+      value.innerHTML = fieldHTML(f, text, isActive);
+      const len = text.length + (f.key === 'ftFrac' ? 2 : f.unit.length > 1 ? 1 : 0);
+      value.dataset.size = len > 11 ? 's' : len > 8 ? 'm' : '';
       el.setAttribute('aria-pressed', String(isActive));
-      el.dataset.fresh = String(isActive && fresh);
     }
     precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
 
-    const def = FIELDS.find((f) => f.key === state.active)!;
+    const def = defOf(state.active);
     document.querySelectorAll<HTMLButtonElement>('.conv-keys .key').forEach((k) => {
       const kind = k.dataset.kind;
-      k.disabled = (kind === 'frac' && !def.fractional) || (kind === 'ft' && def.key !== 'ftFrac');
+      k.disabled =
+        (kind === 'frac' && !def.fractional) ||
+        (kind === 'ft' && (def.key !== 'ftFrac' || (!fresh && state.text.includes("'"))));
     });
 
     hint.textContent = state.text && state.inches === null ? 'Keep typing…' : '';
 
     save('conv', state);
-    shared.convPeek = state.inches === null ? '' : formatInchFraction(state.inches, precision);
+    shared.convPeek = state.inches === null ? '' : inchHTML(state.inches, precision);
   }
+
+  /* ---------- Input ---------- */
 
   function activate(key: FieldKey) {
     if (key === state.active) {
       // Tapping the active field again toggles between "select all" and caret-at-end.
       if (state.text) fresh = !fresh;
     } else {
-      const def = FIELDS.find((f) => f.key === key)!;
-      state = { ...state, active: key, text: state.inches === null ? '' : def.format(state.inches, precision) };
+      state = { ...state, active: key, text: state.inches === null ? '' : defOf(key).format(state.inches, precision) };
       fresh = true;
     }
     render();
   }
 
   function input(k: string) {
-    const def = FIELDS.find((f) => f.key === state.active)!;
+    const def = defOf(state.active);
     let text = state.text;
     if (k === 'clear') {
       state = { ...state, text: '', inches: null };
@@ -123,12 +155,16 @@ const keys: [string, string, string][] = [
       text = fresh ? '' : text.slice(0, -1);
     } else {
       if (fresh) text = '';
-      if (k === '.' && /\.\d*$/.test(text.split(/[\s/']/).pop() ?? '')) return;
+      const part = text.split(/[\s/']/).pop() ?? '';
+      if (k === '.' && part.includes('.')) return;
       if (k === '.' && (text === '' || /[\s/']$/.test(text))) text += '0';
-      if (k === ' ' && (text === '' || /[\s/']$/.test(text) || / \d|\//.test(text.split("'").pop()!))) return;
-      if (k === '/' && !/\d$/.test(text)) return;
-      if (k === '/' && /\//.test(text.split(/[\s']/).pop() ?? '')) return;
-      if (k === "'" && (!/\d$/.test(text) || text.includes("'"))) return;
+      if (k === ' ' && (text === '' || /[\s/'.]$/.test(text) || /[ /]/.test(text.split("'").pop()!))) return;
+      if (k === '/' && (!/\d$/.test(text) || /[/.]/.test(text.split(/[\s']/).pop() ?? ''))) return;
+      if (k === "'") {
+        // ft ′ jumps to the inches part.
+        if (text.includes("'") || (text !== '' && !/\d$/.test(text))) return;
+        if (text === '') text = '0';
+      }
       if (text.length >= 16) return;
       text += k;
     }
@@ -159,7 +195,7 @@ const keys: [string, string, string][] = [
       precision = p;
       save('convPrec', p);
       // An untouched value in a fraction field follows the new precision.
-      const def = FIELDS.find((f) => f.key === state.active)!;
+      const def = defOf(state.active);
       if (fresh && def.fractional && state.inches !== null) state.text = def.format(state.inches, p);
       render();
     });
@@ -168,7 +204,8 @@ const keys: [string, string, string][] = [
   // Hardware keyboard support (desktop / tablets).
   document.addEventListener('keydown', (e) => {
     if (document.querySelector('.app')?.getAttribute('data-tab') !== 'convert' || e.metaKey || e.ctrlKey) return;
-    const map: Record<string, string> = { Backspace: 'back', Escape: 'clear', Delete: 'clear', '"': '' };
+    if (document.body.classList.contains('sheet-open')) return;
+    const map: Record<string, string> = { Backspace: 'back', Escape: 'clear', Delete: 'clear' };
     const k = e.key in map ? map[e.key] : e.key;
     if (/^[\d./' ]$/.test(k) || k === 'back' || k === 'clear') {
       e.preventDefault();
@@ -181,8 +218,6 @@ const keys: [string, string, string][] = [
   });
 
   // Restore: show the stored value formatted in the active field.
-  if (state.inches !== null && state.text === '') {
-    state.text = FIELDS.find((f) => f.key === state.active)!.format(state.inches, precision);
-  }
+  if (state.inches !== null) state.text = defOf(state.active).format(state.inches, precision);
   render();
 </script>

@@ -1,6 +1,6 @@
-import { toFraction, fractionText, type Precision, PRECISIONS, DEFAULT_PRECISION } from './units';
+import { toFraction, fractionText, type Precision, type RoundDir, PRECISIONS, DEFAULT_PRECISION } from './units';
 
-const escape = (s: string) =>
+export const escape = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** Escape, swap ' and " for primes, and wrap n/d in a diagonal-fraction span. */
@@ -11,18 +11,27 @@ export function prettyHTML(text: string): string {
     .replace(/(\d+)\/(\d+)/g, '<span class="fr">$1/$2</span>');
 }
 
-/** Inch value → HTML fraction with a ≈ marker when it was rounded. */
-export function inchHTML(inches: number, den: number, approxMark = true): string {
+/** Small arrow after a rounded value: up = the real value is a bit larger, down = a bit smaller. */
+export function roundHTML(dir: RoundDir): string {
+  if (dir === 0) return '';
+  const up = dir > 0;
+  return (
+    `<span class="rd ${up ? 'up' : 'down'}" role="img" aria-label="${up ? 'slightly more' : 'slightly less'}">` +
+    `<svg viewBox="0 0 10 10" aria-hidden="true"><path d="${up ? 'M5 1.5 9 8H1z' : 'M5 8.5 9 2H1z'}"/></svg></span>`
+  );
+}
+
+/** Inch value → HTML fraction, marked when it had to be rounded. */
+export function inchHTML(inches: number, den: number): string {
   const f = toFraction(inches, den);
-  const approx = approxMark && !f.exact ? '<span class="approx" title="Rounded">≈</span>' : '';
-  return approx + prettyHTML(fractionText(f) + '"');
+  return prettyHTML(fractionText(f) + '"') + roundHTML(f.dir);
 }
 
 export function precisionLabel(p: number): string {
   return `1/${p}`;
 }
 
-/** State shared across screens: the Convert tab peeks at the last converted value. */
+/** State shared across screens: the Convert tab peeks at the last converted value (as HTML). */
 export const shared = { convPeek: '' };
 
 export function haptic() {
@@ -92,6 +101,68 @@ export function initPrecisionSheet() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closePrecisionSheet();
   });
+  initSheetDrag(document.querySelector<HTMLElement>('.sheet')!);
+}
+
+/** Drag the sheet down to dismiss; a short or slow drag springs back. */
+function initSheetDrag(sheet: HTMLElement) {
+  let startY = 0;
+  let lastY = 0;
+  let lastT = 0;
+  let velocity = 0;
+  let id: number | null = null;
+  let dragging = false;
+
+  sheet.addEventListener('pointerdown', (e) => {
+    id = e.pointerId;
+    startY = lastY = e.clientY;
+    lastT = e.timeStamp;
+    velocity = 0;
+    dragging = false;
+  });
+
+  sheet.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== id) return;
+    const dy = e.clientY - startY;
+    if (!dragging) {
+      // The grip drags immediately; elsewhere wait for a clear downward pull.
+      const onGrip = (e.target as HTMLElement).closest('.sheet-grip-area');
+      if (!onGrip && dy < 8) return;
+      dragging = true;
+      sheet.setPointerCapture(e.pointerId);
+      sheet.style.transition = 'none';
+    }
+    const dt = Math.max(1, e.timeStamp - lastT);
+    velocity = (e.clientY - lastY) / dt;
+    lastY = e.clientY;
+    lastT = e.timeStamp;
+    // Resist upward drags.
+    const y = dy > 0 ? dy : dy / 6;
+    sheet.style.transform = `translateY(${y}px)`;
+  });
+
+  const end = (e: PointerEvent) => {
+    if (e.pointerId !== id) return;
+    id = null;
+    if (!dragging) return;
+    const dy = e.clientY - startY;
+    sheet.style.transition = '';
+    sheet.style.transform = '';
+    if (dy > sheet.offsetHeight * 0.3 || velocity > 0.5) closePrecisionSheet();
+    suppressNextClick(sheet);
+  };
+  sheet.addEventListener('pointerup', end);
+  sheet.addEventListener('pointercancel', end);
+}
+
+/** Swallow the click that ends a drag, so a key or option isn't triggered by accident. */
+export function suppressNextClick(el: HTMLElement) {
+  const stop = (ev: Event) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+  };
+  el.addEventListener('click', stop, { capture: true, once: true });
+  setTimeout(() => el.removeEventListener('click', stop, { capture: true }), 80);
 }
 
 /** Long-press support (e.g. hold ⌫ to clear). Returns true from the click handler if a long press fired. */

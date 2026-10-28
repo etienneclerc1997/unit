@@ -1,6 +1,7 @@
 // Calculator engine. The expression is a flat list of key tokens so backspace
-// removes exactly what one key press added. Every value is computed in inches;
-// numbers typed without a unit are inches.
+// removes exactly what one key press added, and a cursor index lets you edit
+// anywhere. Every value is computed in inches; a number typed without a unit is
+// inches (after × or ÷ it reads as a plain count, which is the same arithmetic).
 
 export type Op = '+' | '−' | '×' | '÷';
 export type Unit = "'" | '"' | 'mm' | 'cm';
@@ -16,33 +17,39 @@ const TO_INCHES: Record<Unit, (v: number) => number> = {
 const OPS = new Set<string>(['+', '−', '×', '÷']);
 const UNITS = new Set<string>(["'", '"', 'mm', 'cm']);
 const isDigit = (t: string | undefined) => t !== undefined && /^\d$/.test(t);
-const isNumChar = (t: string | undefined) => isDigit(t) || t === '.' || t === '/';
+/** Characters that make up a number literal: `12`, `2.5`, `1/32`, `1 1/32`. */
+const isNumChar = (t: string | undefined) => isDigit(t) || t === '.' || t === '/' || t === ' ';
 export const isOp = (t: string | undefined): t is Op => t !== undefined && OPS.has(t);
 export const isUnit = (t: string | undefined): t is Unit => t !== undefined && UNITS.has(t);
 
 /* ---------- Lexing ---------- */
 
-export type Item =
+/** Every item knows the token range [s, e) it came from, for cursor placement. */
+export type Item = { s: number; e: number } & (
   | { k: 'num'; text: string }
   | { k: 'ans' }
   | { k: 'op'; v: Op }
   | { k: 'lp' }
   | { k: 'rp' }
-  | { k: 'unit'; v: Unit };
+  | { k: 'unit'; v: Unit }
+);
 
 export function lex(tokens: string[]): Item[] {
   const items: Item[] = [];
-  for (const t of tokens) {
+  tokens.forEach((t, i) => {
     const last = items[items.length - 1];
+    const at = { s: i, e: i + 1 };
     if (isNumChar(t)) {
-      if (last?.k === 'num') last.text += t;
-      else items.push({ k: 'num', text: t });
-    } else if (t === 'ANS') items.push({ k: 'ans' });
-    else if (isOp(t)) items.push({ k: 'op', v: t });
-    else if (t === '(') items.push({ k: 'lp' });
-    else if (t === ')') items.push({ k: 'rp' });
-    else if (isUnit(t)) items.push({ k: 'unit', v: t });
-  }
+      if (last?.k === 'num' && last.e === i) {
+        last.text += t;
+        last.e = i + 1;
+      } else items.push({ ...at, k: 'num', text: t });
+    } else if (t === 'ANS') items.push({ ...at, k: 'ans' });
+    else if (isOp(t)) items.push({ ...at, k: 'op', v: t });
+    else if (t === '(') items.push({ ...at, k: 'lp' });
+    else if (t === ')') items.push({ ...at, k: 'rp' });
+    else if (isUnit(t)) items.push({ ...at, k: 'unit', v: t });
+  });
   return items;
 }
 
@@ -50,13 +57,20 @@ export function lex(tokens: string[]): Item[] {
 
 class ParseError extends Error {}
 
-function literal(text: string): number {
-  const parts = text.split('/');
-  if (parts.length > 2 || parts.some((p) => p === '' || p === '.')) throw new ParseError(text);
-  const [a, b] = parts.map(Number);
-  if (Number.isNaN(a) || (b !== undefined && Number.isNaN(b))) throw new ParseError(text);
-  if (b === 0) throw new ParseError('div0');
-  return b === undefined ? a : a / b;
+function literal(raw: string): number {
+  const text = raw.replace(/ +$/, '');
+  let m = text.match(/^(\d+\.?\d*|\.\d+)$/);
+  if (m) return parseFloat(m[1]);
+  m = text.match(/^(?:(\d+) )?(\d+)\/(\d+)$/);
+  if (m) {
+    const den = Number(m[3]);
+    if (den === 0) throw new ParseError('div0');
+    return Number(m[1] ?? 0) + Number(m[2]) / den;
+  }
+  // A mixed number still being typed ("1 1") counts as its whole part.
+  m = text.match(/^(\d+) \d+$/);
+  if (m) return Number(m[1]);
+  throw new ParseError(text);
 }
 
 class Parser {
@@ -150,12 +164,11 @@ class Parser {
   }
 }
 
-/** Drop whatever can't be evaluated yet at the end (a dangling operator, `(`, `/`, `.`). */
+/** Drop whatever can't be evaluated yet at the end (a dangling operator, `(`, `/`, `.`, space). */
 function trimIncomplete(tokens: string[]): string[] {
   const t = [...tokens];
-  while (t.length && (isOp(t[t.length - 1]) || t[t.length - 1] === '(' || t[t.length - 1] === '/' || t[t.length - 1] === '.')) {
-    t.pop();
-  }
+  const dangling = (x: string) => isOp(x) || x === '(' || x === '/' || x === '.' || x === ' ';
+  while (t.length && dangling(t[t.length - 1])) t.pop();
   return t;
 }
 
@@ -175,6 +188,8 @@ export function evaluate(tokens: string[], ans: number, lenient = true): number 
 
 export interface CalcState {
   tokens: string[];
+  /** caret position: a token index from 0 to tokens.length */
+  cursor: number;
   ans: number;
   /** true right after "=": a digit starts over, an operator continues from the answer */
   fresh: boolean;
@@ -183,7 +198,7 @@ export interface CalcState {
   historyAns: number;
 }
 
-export const emptyState = (): CalcState => ({ tokens: [], ans: 0, fresh: false, history: null, historyAns: 0 });
+export const emptyState = (): CalcState => ({ tokens: [], cursor: 0, ans: 0, fresh: false, history: null, historyAns: 0 });
 
 function openParens(tokens: string[]) {
   let n = 0;
@@ -191,7 +206,7 @@ function openParens(tokens: string[]) {
   return n;
 }
 
-/** The number literal currently being typed at the end, if any. */
+/** The number literal right before the caret, if any. */
 function currentNumber(tokens: string[]): string {
   let s = '';
   for (let i = tokens.length - 1; i >= 0 && isNumChar(tokens[i]); i--) s = tokens[i] + s;
@@ -204,75 +219,65 @@ function endsWithOperand(tokens: string[]) {
   return isDigit(last) || isUnit(last) || last === ')' || last === 'ANS';
 }
 
-export function press(state: CalcState, key: string): CalcState {
-  const s: CalcState = { ...state, tokens: [...state.tokens] };
-  const t = s.tokens;
-  const last = t[t.length - 1];
-
-  if (key === 'AC') return emptyState();
-
-  if (key === '⌫') {
-    if (s.fresh) return { ...emptyState(), history: s.history, historyAns: s.historyAns };
-    t.pop();
-    return s;
-  }
-
-  if (key === '=') {
-    const v = evaluate(t, s.ans, true);
-    if (v === null || (t.length === 1 && t[0] === 'ANS')) return s;
-    return { tokens: ['ANS'], ans: v, fresh: true, history: [...t], historyAns: s.ans };
-  }
-
-  // Starting a new number right after "=" replaces the answer.
-  if (s.fresh && (isDigit(key) || key === '.' || key === '(')) {
-    t.length = 0;
-  }
-  s.fresh = false;
+/**
+ * Apply one key to the tokens before the caret. Mutates `t`; returns false
+ * when the key makes no sense here and should be ignored.
+ */
+function applyKey(t: string[], key: string): boolean {
   const tail = t[t.length - 1];
+  const cur = currentNumber(t);
 
   if (isDigit(key)) {
     if (tail === ')' || tail === 'ANS') t.push('×');
+    // After feet, digits continue into the inches part: 5' 3".
+    else if (isUnit(tail) && tail !== "'") return false;
     t.push(key);
-    return s;
+    return true;
   }
 
-  if (key === '.') {
-    const cur = currentNumber(t);
-    const part = cur.split('/').pop() ?? '';
-    if (part.includes('.')) return state;
-    if (tail === ')' || tail === 'ANS') t.push('×');
-    if (!isDigit(t[t.length - 1])) t.push('0');
-    t.push('.');
-    return s;
+  if (key === ' ') {
+    // Starts the fraction of a mixed number: 1 → 1 1/32.
+    if (!isDigit(tail) || /[ ./]/.test(cur)) return false;
+    t.push(' ');
+    return true;
   }
 
   if (key === '/') {
-    const cur = currentNumber(t);
-    if (!isDigit(tail) || cur.includes('/')) return state;
+    if (!isDigit(tail) || /[./]/.test(cur)) return false;
     t.push('/');
-    return s;
+    return true;
+  }
+
+  if (key === '.') {
+    if (/[ ./]/.test(cur)) return false;
+    if (tail === ')' || tail === 'ANS') t.push('×');
+    else if (isUnit(tail) && tail !== "'") return false;
+    if (!isDigit(t[t.length - 1])) t.push('0');
+    t.push('.');
+    return true;
   }
 
   if (isOp(key)) {
     if (t.length === 0 || tail === '(') {
-      if (key === '−') t.push(key);
-      return s;
+      if (key !== '−') return false;
+      t.push(key);
+      return true;
     }
     if (isOp(tail)) {
       // 2 × −3: a minus after × or ÷ is a sign.
       if (key === '−' && (tail === '×' || tail === '÷')) {
         t.push(key);
-        return s;
+        return true;
       }
       // Otherwise replace the operator, unless it's a sign.
       const before = t[t.length - 2];
-      if (before === undefined || before === '(' || isOp(before)) return state;
+      if (before === undefined || before === '(' || isOp(before)) return false;
       t[t.length - 1] = key;
-      return s;
+      return true;
     }
-    if (tail === '.' || tail === '/') return state;
+    if (tail === '.' || tail === '/' || tail === ' ') return false;
     t.push(key);
-    return s;
+    return true;
   }
 
   if (key === '()') {
@@ -281,22 +286,50 @@ export function press(state: CalcState, key: string): CalcState {
       if (endsWithOperand(t)) t.push('×');
       t.push('(');
     }
-    return s;
+    return true;
   }
 
   if (isUnit(key)) {
     if (isUnit(tail)) {
       t[t.length - 1] = key; // swap units: mm → cm
-      return s;
+      return true;
     }
-    if (isDigit(tail) || tail === ')') {
-      t.push(key);
-      return s;
-    }
-    return state;
+    if (!isDigit(tail) && tail !== ')') return false;
+    t.push(key);
+    return true;
   }
 
-  return state;
+  return false;
+}
+
+export function press(state: CalcState, key: string): CalcState {
+  if (key === 'AC') return emptyState();
+
+  if (key === '⌫') {
+    if (state.fresh) return { ...emptyState(), history: state.history, historyAns: state.historyAns };
+    if (state.cursor === 0) return state;
+    const tokens = [...state.tokens];
+    tokens.splice(state.cursor - 1, 1);
+    return { ...state, tokens, cursor: state.cursor - 1 };
+  }
+
+  if (key === '=') {
+    const v = evaluate(state.tokens, state.ans, true);
+    if (v === null || (state.tokens.length === 1 && state.tokens[0] === 'ANS')) return state;
+    return { tokens: ['ANS'], cursor: 1, ans: v, fresh: true, history: [...state.tokens], historyAns: state.ans };
+  }
+
+  let tokens = state.tokens;
+  let cursor = Math.min(state.cursor, tokens.length);
+  // Starting a new number right after "=" replaces the answer.
+  if (state.fresh && (isDigit(key) || key === '.' || key === '(' || key === '()')) {
+    tokens = [];
+    cursor = 0;
+  }
+
+  const before = tokens.slice(0, cursor);
+  if (!applyKey(before, key)) return state;
+  return { ...state, tokens: [...before, ...tokens.slice(cursor)], cursor: before.length, fresh: false };
 }
 
 /* ---------- Repeat / split ---------- */

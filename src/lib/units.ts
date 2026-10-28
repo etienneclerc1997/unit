@@ -8,33 +8,55 @@ export const DEFAULT_PRECISION: Precision = 32;
 
 export type FieldKey = 'mm' | 'cm' | 'in' | 'inFrac' | 'ftFrac' | 'm';
 
+/** How the real value compares to the displayed one: 1 = slightly larger, -1 = slightly smaller. */
+export type RoundDir = -1 | 0 | 1;
+
 export interface Fraction {
   neg: boolean;
   whole: number;
   num: number;
   den: number;
-  /** false when the value had to be rounded to fit the precision */
-  exact: boolean;
+  dir: RoundDir;
 }
 
 const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+const EPS = 1e-6;
 
-/** Round an inch value to the nearest 1/den and reduce to the simplest fraction. */
+/** Imperial denominators a thousandth may simplify to (1/1000 can only land exactly on 1/2, 1/4, 1/8). */
+const IMPERIAL = new Set([1, 2, 4, 8, 16, 32, 64]);
+
+/**
+ * Round an inch value to the nearest 1/den and reduce to the simplest fraction.
+ * With 1/1000, values stay in thousandths (3mm → 118/1000) unless they fall
+ * exactly on a 64th or simplify to an imperial denominator.
+ */
 export function toFraction(inches: number, den: number): Fraction {
   const neg = inches < 0;
   const abs = Math.abs(inches);
-  const scaled = abs * den;
-  const rounded = Math.round(scaled);
-  const exact = Math.abs(scaled - rounded) < 1e-6;
-  let whole = Math.floor(rounded / den);
-  let num = rounded % den;
   let d = den;
+  let rounded: number;
+
+  const in64ths = abs * 64;
+  if (den === 1000 && Math.abs(in64ths - Math.round(in64ths)) < EPS) {
+    d = 64;
+    rounded = Math.round(in64ths);
+  } else {
+    rounded = Math.round(abs * den);
+  }
+
+  const diff = abs * d - rounded;
+  const dir: RoundDir = Math.abs(diff) < EPS ? 0 : (diff > 0) !== neg ? 1 : -1;
+
+  const whole = Math.floor(rounded / d);
+  let num = rounded % d;
   if (num > 0) {
     const g = gcd(num, d);
-    num /= g;
-    d /= g;
+    if (den !== 1000 || IMPERIAL.has(d / g)) {
+      num /= g;
+      d /= g;
+    }
   }
-  return { neg: neg && rounded !== 0, whole, num, den: d, exact };
+  return { neg: neg && rounded !== 0, whole, num, den: d, dir };
 }
 
 /** Plain-text inch fraction, e.g. `1 1/32"`. */
@@ -50,20 +72,25 @@ export function fractionText(f: Fraction): string {
   return `${sign}${f.whole} ${f.num}/${f.den}`;
 }
 
-/** Feet + inch fraction, e.g. `5' 3 1/2"`. */
-export function formatFeetFraction(inches: number, den: number): string {
+/** Feet + inch fraction, e.g. `5' 3 1/2"`, and which way it was rounded. */
+export function feetFraction(inches: number, den: number): { text: string; dir: RoundDir } {
   const neg = inches < 0;
   const abs = Math.abs(inches);
   let feet = Math.floor(abs / 12);
   let rest = toFraction(abs - feet * 12, den);
+  const dir = (neg ? -rest.dir : rest.dir) as RoundDir;
   // Rounding can push the inch part up to a full foot.
   if (rest.whole >= 12) {
     feet += 1;
     rest = toFraction(0, den);
   }
   const sign = neg && (feet > 0 || rest.whole > 0 || rest.num > 0) ? '-' : '';
-  if (rest.whole === 0 && rest.num === 0) return `${sign}${feet}'`;
-  return `${sign}${feet}' ${fractionText(rest)}"`;
+  if (rest.whole === 0 && rest.num === 0) return { text: `${sign}${feet}'`, dir };
+  return { text: `${sign}${feet}' ${fractionText(rest)}"`, dir };
+}
+
+export function formatFeetFraction(inches: number, den: number): string {
+  return feetFraction(inches, den).text;
 }
 
 export function formatDecimal(value: number, decimals: number): string {
@@ -124,7 +151,10 @@ export interface FieldDef {
   unit: string;
   fractional: boolean;
   parse: (text: string) => number | null;
+  /** Editable text for the field (feet: `5'3 1/2`, units are drawn by the UI). */
   format: (inches: number, den: number) => string;
+  /** Rounding direction of the formatted value, for fraction fields. */
+  dir?: (inches: number, den: number) => RoundDir;
 }
 
 export const FIELDS: FieldDef[] = [
@@ -147,11 +177,13 @@ export const FIELDS: FieldDef[] = [
     key: 'inFrac', label: 'Inch fraction', unit: '"', fractional: true,
     parse: parseInchFraction,
     format: (v, den) => formatInchFraction(v, den, ''),
+    dir: (v, den) => toFraction(v, den).dir,
   },
   {
     key: 'ftFrac', label: 'Feet', unit: '', fractional: true,
     parse: parseFeetFraction,
-    format: (v, den) => formatFeetFraction(v, den),
+    format: (v, den) => formatFeetFraction(v, den).replace("' ", "'").replace(/"$/, ''),
+    dir: (v, den) => feetFraction(v, den).dir,
   },
   {
     key: 'm', label: 'Meters', unit: 'm', fractional: false,

@@ -3,16 +3,16 @@ import Icon from './Icon.astro';
 
 // [label, key, style]
 const keys: [string, string, string][] = [
-  ['AC', 'AC', 'fn'], ['( )', '()', 'fn'], ['/', '/', 'frac'], ['÷', '÷', 'op'],
+  ['AC', 'AC', 'fn'], ['( )', '()', 'fn'], ['/', '/', ''], ['÷', '÷', 'op'],
   ['7', '7', ''], ['8', '8', ''], ['9', '9', ''], ['×', '×', 'op'],
   ['4', '4', ''], ['5', '5', ''], ['6', '6', ''], ['−', '−', 'op'],
   ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['+', '+', 'op'],
-  ['0', '0', ''], ['.', '.', ''], ['⌫', '⌫', 'fn'], ['=', '=', 'eq'],
+  ['0', '0', ''], ['.', '.', ''], ['space', ' ', 'small-label'], ['=', '=', 'eq'],
   ['ft', "'", 'unit'], ['in', '"', 'unit'], ['mm', 'mm', 'unit'], ['cm', 'cm', 'unit'],
 ];
 const labels: Record<string, string> = {
-  '()': 'Parentheses', '/': 'Fraction', '÷': 'Divide', '×': 'Multiply', '−': 'Minus', '+': 'Plus',
-  '⌫': 'Delete', '=': 'Equals', AC: 'All clear', "'": 'Feet', '"': 'Inches', mm: 'Millimeters', cm: 'Centimeters',
+  '()': 'Parentheses', '/': 'Fraction', '÷': 'Divide', '×': 'Multiply', '−': 'Minus', '+': 'Plus', ' ': 'Space',
+  '=': 'Equals', AC: 'All clear', "'": 'Feet', '"': 'Inches', mm: 'Millimeters', cm: 'Centimeters',
 };
 ---
 
@@ -23,16 +23,19 @@ const labels: Record<string, string> = {
         <span class="chip-text">1/32</span>
         <Icon name="chevron" />
       </button>
-      <div class="history" id="history"></div>
+      <button class="icon-btn" id="calc-back" aria-label="Delete (hold to clear)">
+        <Icon name="backspace" />
+      </button>
     </div>
-    <div class="expr" id="expr" aria-live="polite"></div>
+    <div class="history" id="history"></div>
+    <div class="expr h-scroll" id="expr" aria-live="polite" role="textbox" aria-label="Equation"></div>
     <div class="result" id="result" aria-live="polite"></div>
   </div>
 
   <div class="keypad calc-keys">
     {keys.map(([label, k, style]) => (
-      <button class:list={['key', style === 'frac' ? '' : style]} data-k={k} aria-label={labels[k]}>
-        {k === '⌫' ? <Icon name="backspace" /> : label}
+      <button class:list={['key', style]} data-k={k} aria-label={labels[k]}>
+        {label}
       </button>
     ))}
   </div>
@@ -40,8 +43,9 @@ const labels: Record<string, string> = {
   <div class="series" data-mode="repeat">
     <div class="series-bar">
       <button class="mode-toggle" id="mode-toggle" aria-label="Switch between repeat and split">
-        <Icon name="swap" />
+        <span class="orb orb-xs" id="mode-orb"></span>
         <span id="mode-label">Repeat</span>
+        <Icon name="swap" />
       </button>
       <div class="counter">
         <button id="count-dec" aria-label="Fewer"><Icon name="minus" /></button>
@@ -49,16 +53,18 @@ const labels: Record<string, string> = {
         <button id="count-inc" aria-label="More"><Icon name="plus" /></button>
       </div>
     </div>
-    <div class="line-scroll" id="line-scroll">
-      <div class="line" id="line"><div class="line-track"></div></div>
+    <div class="line-scroll h-scroll" id="line-scroll">
+      <div class="line" id="line"><div class="ruler"></div></div>
     </div>
   </div>
 </section>
 
 <script>
-  import { lex, evaluate, press, series, emptyState, type CalcState, type SeriesMode } from '../lib/calc';
-  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, inchHTML, precisionLabel, onLongPress } from '../lib/ui';
-  import { formatInchFraction } from '../lib/units';
+  import { lex, evaluate, press, series, emptyState, type CalcState, type SeriesMode, type Item } from '../lib/calc';
+  import {
+    haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, escape, inchHTML, precisionLabel, onLongPress,
+  } from '../lib/ui';
+  import { toFraction, fractionText } from '../lib/units';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
   const display = document.querySelector<HTMLElement>('.display')!;
@@ -69,68 +75,106 @@ const labels: Record<string, string> = {
   const seriesEl = document.querySelector<HTMLElement>('.series')!;
   const lineScroll = $('line-scroll');
   const line = $('line');
+  const ruler = line.querySelector<HTMLElement>('.ruler')!;
 
   let state: CalcState = { ...emptyState(), ...load<Partial<CalcState>>('calc', {}) };
+  state.cursor = Math.min(state.cursor ?? state.tokens.length, state.tokens.length);
   let precision = loadPrecision('calcPrec');
   let mode: SeriesMode = load<SeriesMode>('mode', 'repeat') === 'split' ? 'split' : 'repeat';
   let count = Math.min(99, Math.max(1, load<number>('count', 2)));
 
-  /* ---------- Expression rendering ---------- */
+  /* ---------- Equation rendering ---------- */
 
-  function exprHTML(tokens: string[], ans: number): string {
-    let html = '';
-    let prevUnit = false;
-    for (const it of lex(tokens)) {
+  const CARET = '<span class="caret"></span>';
+  const tok = (s: number, e: number, html: string, cls = '') => `<span class="tk ${cls}" data-s="${s}" data-e="${e}">${html}</span>`;
+
+  /**
+   * Render the equation. A bare number gets a faded ″ (inches is the default
+   * unit), except after × or ÷ where it reads as a count.
+   */
+  function exprHTML(tokens: string[], ans: number, cursor: number | null): string {
+    const items = lex(tokens);
+    const caret = (i: number) => (cursor === i ? CARET : '');
+    let html = caret(0);
+    items.forEach((it, n) => {
+      const prev: Item | undefined = items[n - 1];
+      const next: Item | undefined = items[n + 1];
       switch (it.k) {
-        case 'num':
-          html += (prevUnit ? ' ' : '') + prettyHTML(it.text);
+        case 'num': {
+          if (prev?.k === 'unit') html += '<span class="gap"></span>';
+          // Fractions render as one diagonal glyph unless the caret sits inside them.
+          if (it.text.includes('/') && !(cursor !== null && cursor > it.s && cursor < it.e)) {
+            html += tok(it.s, it.e, prettyHTML(it.text)) + caret(it.e);
+          } else {
+            [...it.text].forEach((ch, j) => {
+              html += tok(it.s + j, it.s + j + 1, ch === ' ' ? '&nbsp;' : escape(ch), ch === ' ' ? 'sp' : '');
+              html += caret(it.s + j + 1);
+            });
+          }
+          const scalar = prev?.k === 'op' && (prev.v === '×' || prev.v === '÷');
+          if (next?.k !== 'unit' && !scalar) html += '<span class="ghost">″</span>';
           break;
+        }
         case 'ans':
-          html += inchHTML(ans, precision, false);
+          html += tok(it.s, it.e, inchHTML(ans, precision), 'ans') + caret(it.e);
           break;
         case 'op':
-          html += `<span class="op-sym">${it.v}</span>`;
+          html += tok(it.s, it.e, it.v, 'op-sym') + caret(it.e);
           break;
         case 'lp':
-          html += '(';
+          html += tok(it.s, it.e, '(') + caret(it.e);
           break;
         case 'rp':
-          html += ')';
+          html += tok(it.s, it.e, ')') + caret(it.e);
           break;
-        case 'unit':
-          html += it.v === "'" ? '′' : it.v === '"' ? '″' : `<span class="unit-sym">&thinsp;${it.v}</span>`;
+        case 'unit': {
+          const u = it.v === "'" ? '′' : it.v === '"' ? '″' : `&thinsp;${it.v}`;
+          html += tok(it.s, it.e, u, 'unit-sym') + caret(it.e);
           break;
+        }
       }
-      prevUnit = it.k === 'unit';
-    }
+    });
     return html;
   }
 
+  function keepCaretVisible() {
+    if (state.cursor >= state.tokens.length) {
+      exprEl.scrollLeft = exprEl.scrollWidth;
+      return;
+    }
+    const c = exprEl.querySelector<HTMLElement>('.caret');
+    if (!c) return;
+    const x = c.offsetLeft;
+    if (x < exprEl.scrollLeft + 24) exprEl.scrollLeft = x - 24;
+    else if (x > exprEl.scrollLeft + exprEl.clientWidth - 24) exprEl.scrollLeft = x - exprEl.clientWidth + 24;
+  }
+
   function render() {
-    const html = exprHTML(state.tokens, state.ans);
-    exprEl.innerHTML = html;
+    const onlyAns = state.tokens.length === 1 && state.tokens[0] === 'ANS';
+    exprEl.innerHTML = exprHTML(state.tokens, state.ans, state.fresh ? null : state.cursor);
     const len = exprEl.textContent!.length;
     exprEl.dataset.size = len > 16 ? 's' : len > 10 ? 'm' : '';
-    exprEl.scrollLeft = exprEl.scrollWidth;
+    exprEl.classList.toggle('scrollable', exprEl.scrollWidth > exprEl.clientWidth + 1);
+    keepCaretVisible();
 
-    const onlyAns = state.tokens.length === 1 && state.tokens[0] === 'ANS';
     const v = evaluate(state.tokens, state.ans);
     resultEl.innerHTML = v === null || onlyAns ? '' : inchHTML(v, precision);
-    display.dataset.fresh = String(onlyAns);
+    display.dataset.fresh = String(state.fresh);
 
     historyEl.innerHTML =
-      state.history && state.tokens[0] === 'ANS' ? `<span>${exprHTML(state.history, state.historyAns)} =</span>` : '';
+      state.history && state.tokens[0] === 'ANS' ? `<span>${exprHTML(state.history, state.historyAns, null)} =</span>` : '';
 
     precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
     renderSeries();
     save('calc', state);
   }
 
-  /* ---------- Repeat / split line ---------- */
+  /* ---------- Repeat / split ruler ---------- */
 
   function renderSeries() {
     seriesEl.dataset.mode = mode;
     $('mode-label').textContent = mode === 'repeat' ? 'Repeat' : 'Split';
+    $('mode-orb').className = `orb orb-xs ${mode === 'repeat' ? 'orb-ocean' : 'orb-sunset'}`;
     $('count').textContent = String(count);
     $<HTMLButtonElement>('count-dec').disabled = count <= 1;
     $<HTMLButtonElement>('count-inc').disabled = count >= 99;
@@ -141,30 +185,34 @@ const labels: Record<string, string> = {
       ? series(mode, state.history!, state.historyAns, count)
       : series(mode, state.tokens, state.ans, count);
 
-    const track = line.querySelector('.line-track')!;
+    line.querySelector('.line-empty')?.remove();
     if (!pts) {
       line.querySelectorAll('.pt').forEach((p) => p.remove());
-      line.querySelector('.line-empty')?.remove();
+      ruler.hidden = true;
+      line.style.width = '';
+      lineScroll.classList.remove('scrollable');
       const empty = document.createElement('div');
       empty.className = 'line-empty';
       empty.textContent = mode === 'repeat' ? 'Type an equation to repeat it' : 'Type a measurement to split it';
       line.append(empty);
-      (track as HTMLElement).hidden = true;
-      line.style.width = '';
       return;
     }
-    line.querySelector('.line-empty')?.remove();
-    (track as HTMLElement).hidden = false;
+    ruler.hidden = false;
 
-    const labels = pts.map((p) => formatInchFraction(p, precision));
+    const labels = pts.map((p) => fractionText(toFraction(p, precision)));
     const longest = Math.max(...labels.map((l) => l.length));
-    // Diagonal fractions are compact: roughly 6.4px per character at 13px.
-    const labelW = longest * 6.4 + 20;
-    const pad = Math.max(18, labelW / 2);
+    // Diagonal fractions are compact: roughly 6.6px per character at 13px, plus the ″ and arrow.
+    const labelW = longest * 6.6 + 30;
+    const pad = Math.ceil(labelW / 2);
     const avail = lineScroll.clientWidth;
-    const width = Math.max(avail, pad * 2 + (pts.length - 1) * labelW);
+    const segW = Math.max(labelW, (avail - pad * 2) / (pts.length - 1));
+    const width = Math.max(avail, Math.ceil(pad * 2 + segW * (pts.length - 1)));
+    const seg = (width - pad * 2) / (pts.length - 1);
     line.style.width = `${width}px`;
     line.style.setProperty('--pad', `${pad}px`);
+    // Minor ticks every ~7px, evenly dividing each segment so they line up with the majors.
+    line.style.setProperty('--period', `${seg / Math.max(1, Math.round(seg / 7))}px`);
+    lineScroll.classList.toggle('scrollable', width > avail);
 
     const existing = Array.from(line.querySelectorAll<HTMLElement>('.pt'));
     existing.slice(pts.length).forEach((p) => p.remove());
@@ -173,11 +221,12 @@ const labels: Record<string, string> = {
       if (!el) {
         el = document.createElement('div');
         el.className = 'pt';
-        el.innerHTML = '<span class="pt-label"></span><span class="pt-dot"></span>';
+        el.innerHTML = '<span class="pt-label"></span><span class="pt-tick"></span>';
         line.append(el);
       }
-      el.querySelector('.pt-label')!.innerHTML = inchHTML(p, precision, false);
-      el.style.left = `${pad + (pts.length === 1 ? 0 : (i * (width - pad * 2)) / (pts.length - 1))}px`;
+      el.classList.toggle('end', i === 0 || i === pts.length - 1);
+      el.querySelector('.pt-label')!.innerHTML = inchHTML(p, precision);
+      el.style.left = `${pad + i * seg}px`;
     });
   }
 
@@ -200,9 +249,24 @@ const labels: Record<string, string> = {
     key(k.dataset.k!);
   });
 
-  onLongPress(document.querySelector<HTMLElement>('.calc-keys [data-k="⌫"]')!, () => {
+  const back = $('calc-back');
+  back.addEventListener('click', () => (haptic(), key('⌫')));
+  onLongPress(back, () => (haptic(), key('AC')));
+
+  // Tap in the equation to move the caret, like a text field.
+  exprEl.addEventListener('click', (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>('.tk');
+    let cursor = state.tokens.length;
+    if (t) {
+      const r = t.getBoundingClientRect();
+      cursor = e.clientX < r.left + r.width / 2 ? Number(t.dataset.s) : Number(t.dataset.e);
+    } else {
+      const first = exprEl.querySelector<HTMLElement>('.tk');
+      if (first && e.clientX < first.getBoundingClientRect().left && e.clientX > first.getBoundingClientRect().left - 32) cursor = 0;
+    }
     haptic();
-    key('AC');
+    state = { ...state, cursor, fresh: false };
+    render();
   });
 
   $('mode-toggle').addEventListener('click', () => {
@@ -233,13 +297,20 @@ const labels: Record<string, string> = {
   // Hardware keyboard support.
   document.addEventListener('keydown', (e) => {
     if (document.querySelector('.app')?.getAttribute('data-tab') !== 'calc' || e.metaKey || e.ctrlKey) return;
+    if (document.body.classList.contains('sheet-open')) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      const c = state.cursor + (e.key === 'ArrowLeft' ? -1 : 1);
+      state = { ...state, cursor: Math.max(0, Math.min(state.tokens.length, c)), fresh: false };
+      return render();
+    }
     const map: Record<string, string> = {
-      Enter: '=', '=': '=', Backspace: '⌫', Escape: 'AC', Delete: 'AC',
+      Enter: '=', '=': '=', Backspace: '⌫', Escape: 'AC', Delete: 'AC', ' ': ' ',
       '*': '×', x: '×', '-': '−', '+': '+', ':': '÷', '(': '()', ')': '()', "'": "'", '"': '"',
     };
     let k = /^[\d.]$/.test(e.key) ? e.key : map[e.key];
     // "/" types a fraction after a digit, otherwise divides.
-    if (e.key === '/') k = /\d$/.test(state.tokens[state.tokens.length - 1] ?? '') ? '/' : '÷';
+    if (e.key === '/') k = /\d$/.test(state.tokens[state.cursor - 1] ?? '') ? '/' : '÷';
     if (!k) return;
     e.preventDefault();
     key(k);
