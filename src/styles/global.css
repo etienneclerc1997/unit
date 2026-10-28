@@ -608,8 +608,6 @@ button:focus-visible {
   overflow: clip;
   pointer-events: none;
   transition: transform 0.45s var(--ease);
-  /* Its own layer for good, so animations around it never re-layer the keys. */
-  will-change: transform;
 }
 
 .app[data-tab='level'] .keys-layer {
@@ -642,6 +640,10 @@ button:focus-visible {
     background-color 0.2s ease,
     transform 0.2s var(--ease),
     opacity 0.2s ease;
+  /* Each key keeps its own layer. Otherwise the end of every press animation
+     merges the key back into the keypad's, and Chrome redraws the keypad with
+     a blank frame (= flashed white after each tap). */
+  will-change: transform;
 }
 
 /* The extra keys keep their press effect on .key's transform, and move on
@@ -1035,13 +1037,6 @@ button:focus-visible {
     opacity: 0;
     transform: translateX(-50%) translateY(4px);
   }
-}
-
-/* Below the fold nobody sees the points move, and animating them right under the
-   keypad made Safari re-layer it (= flickered with every digit). */
-.viewport:not(.scrolled) .pt {
-  transition: none;
-  animation: none;
 }
 
 .line-empty {
