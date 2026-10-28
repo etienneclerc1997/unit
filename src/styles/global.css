@@ -608,6 +608,8 @@ button:focus-visible {
   overflow: clip;
   pointer-events: none;
   transition: transform 0.45s var(--ease);
+  /* Its own layer for good, so animations around it never re-layer the keys. */
+  will-change: transform;
 }
 
 .app[data-tab='level'] .keys-layer {
@@ -1033,6 +1035,13 @@ button:focus-visible {
     opacity: 0;
     transform: translateX(-50%) translateY(4px);
   }
+}
+
+/* Below the fold nobody sees the points move, and animating them right under the
+   keypad made Safari re-layer it (= flickered with every digit). */
+.viewport:not(.scrolled) .pt {
+  transition: none;
+  animation: none;
 }
 
 .line-empty {
