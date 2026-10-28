@@ -57,7 +57,8 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     GravityFilter, detectMode, read, calibrate, offsetAt, noCalibration,
     type Calibration, type LevelMode, type Reading, type Vec3,
   } from '../lib/level';
-  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel, inchHTML } from '../lib/ui';
+  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel, roundHTML } from '../lib/ui';
+  import { toFraction, fractionText } from '../lib/units';
   import { Odometer } from '../lib/odometer';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -273,31 +274,74 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
   let shown: Reading | null = null;
   let lastText = 0;
   let lastShownAt = 0;
-  // The other distances refresh only once the reading has settled.
-  let settleRef = Infinity;
-  let settledAt = 0;
-  let othersFresh = false;
 
-  function distHTML(r: Reading, d: number) {
-    // Anything that rounds to zero reads as exactly zero (no ± mark from sensor noise).
-    const off = Math.abs(offsetAt(r.deviation, d));
-    return inchHTML(Math.round(off * precision) === 0 ? 0 : off, precision);
+  /* "Out over" runs on its own, slower clock. The gauge follows a heavier filter
+     (~0.6 s). The numbers show the average over their update window (0.5 s for
+     the selected distance, 1.5 s for the others), with hysteresis so a value
+     sitting between two fractions doesn't flip back and forth. */
+  const SLOW_TAU = 0.6;
+  let slowDev: number | null = null;
+  /** Running averages of the deviation since each window last refreshed. */
+  const windows = {
+    selected: { ms: 500, sum: 0, n: 0, at: 0 },
+    others: { ms: 1500, sum: 0, n: 0, at: 0 },
+  };
+  /** Displayed value per distance, in steps of 1/precision. */
+  const shownSteps = new Map<number, number>();
+
+  function distHTML(off: number, steps: number) {
+    const shownInches = steps / precision;
+    // The ± mark compares the real offset with the fraction on screen.
+    const diff = off - shownInches;
+    const dir = steps === 0 || Math.abs(diff) * precision < 0.1 ? 0 : diff > 0 ? 1 : -1;
+    return prettyHTML(fractionText(toFraction(shownInches, precision)) + '"') + roundHTML(dir);
   }
 
-  function renderDists(r: Reading, all: boolean) {
+  /** Render distances from a deviation; `which` picks the selected one, the others, or both. */
+  function renderDists(dev: number | null, which: 'selected' | 'others' | 'all', force = false) {
+    if (dev === null) return;
     dists.forEach((b) => {
       const d = Number(b.dataset.d);
       const selected = d === distance;
       b.setAttribute('aria-checked', String(selected));
-      if (selected || all) b.querySelector('.dist-value')!.innerHTML = distHTML(r, d);
+      if ((which === 'selected' && !selected) || (which === 'others' && selected)) return;
+      const off = Math.abs(offsetAt(dev, d));
+      const exact = off * precision;
+      const prev = shownSteps.get(d);
+      // Only move once the value is well past the halfway point to the next step.
+      if (!force && prev !== undefined && Math.abs(exact - prev) < 0.8) return;
+      const steps = Math.round(exact);
+      shownSteps.set(d, steps);
+      b.querySelector('.dist-value')!.innerHTML = distHTML(off, steps);
     });
+  }
+
+  function resetWindows() {
+    for (const w of Object.values(windows)) (w.sum = 0), (w.n = 0);
+  }
+
+  function updateDists(dev: number, dt: number, now: number) {
+    // Snap on big jumps (switching level ↔ plumb ↔ flat), glide otherwise.
+    if (slowDev === null || Math.abs(dev - slowDev) > 3) {
+      slowDev = dev;
+      resetWindows();
+    } else slowDev += (dev - slowDev) * (1 - Math.exp(-dt / SLOW_TAU));
+
+    for (const [which, w] of Object.entries(windows) as ['selected' | 'others', typeof windows.selected][]) {
+      w.sum += dev;
+      w.n++;
+      if (now - w.at < w.ms) continue;
+      renderDists(w.sum / w.n, which, shownSteps.size === 0);
+      w.at = now;
+      w.sum = 0;
+      w.n = 0;
+    }
   }
 
   function renderText(r: Reading) {
     odometer.set(r.angle);
     modeEl.textContent = r.mode === 'flat' ? 'Flat' : r.angle > 45 ? 'Plumb' : 'Level';
     devEl.textContent = r.mode === 'flat' ? '' : `${Math.abs(r.deviation).toFixed(2)}° off`;
-    renderDists(r, false);
   }
 
   /** Text updates at ~6 Hz, and only when the reading moved past the deadband. */
@@ -306,30 +350,19 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     lastText = now;
     const moved = shown ? Math.abs(r.angle - shown.angle) : Infinity;
     const changedMode = shown && (shown.mode !== r.mode || shown.angle > 45 !== r.angle > 45);
-    // While the phone is moving, the other distances hold still.
-    if (Math.abs(r.angle - settleRef) > 0.05) {
-      settleRef = r.angle;
-      settledAt = now;
-    }
-    const settled = now - settledAt > 700;
-
     // Small drifts still land eventually, just not every frame.
     if (moved >= 0.015 || changedMode || (moved >= 0.005 && now - lastShownAt > 1000)) {
       shown = r;
       lastShownAt = now;
       renderText(r);
-      if (settled) renderDists(r, true);
-      othersFresh = settled;
-    } else if (settled && !othersFresh && shown) {
-      othersFresh = true;
-      renderDists(shown, true);
     }
   }
 
   function renderFrame(now: number) {
     frame = requestAnimationFrame(renderFrame);
     if (!raw) return;
-    const g = filter.push(raw, (now - (lastSample || now)) / 1000);
+    const dt = (now - (lastSample || now)) / 1000;
+    const g = filter.push(raw, dt);
     lastSample = now;
     mode = detectMode(g, mode);
     const r = read(g, mode, cal);
@@ -340,8 +373,9 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     // On a whole degree the index itself is the match, so nothing else lights up.
     vernierTicks.forEach((t, k) => t.classList.toggle('on', k === tenth && k > 0));
 
-    // Offset gauge for the selected distance.
-    const off = offsetAt(r.deviation, distance);
+    // Offset gauge for the selected distance, on the slower clock.
+    updateDists(r.deviation, dt, now);
+    const off = offsetAt(slowDev!, distance);
     gaugeScale.setAttribute('transform', `translate(${-off * PX} 0)`);
     const q = Math.round(((((off * 16) % 1) + 1) % 1) * 4) % 4;
     gaugeTicks.forEach((t, k) => t.classList.toggle('on', k === q && k > 0));
@@ -403,8 +437,8 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
       haptic();
       distance = Number(b.dataset.d);
       save('levelDist', distance);
-      if (shown) renderDists(shown, true);
-      else dists.forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+      dists.forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+      renderDists(slowDev, 'all', true);
     }),
   );
 
@@ -417,7 +451,7 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
       precision = p;
       save('levelPrec', p);
       renderPrec();
-      if (shown) renderDists(shown, true);
+      renderDists(slowDev, 'all', true);
     });
   });
   renderPrec();
