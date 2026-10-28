@@ -131,8 +131,9 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     const [x2, y2] = polar(R - len, phi);
     vernierTicks.push(el('line', { x1, y1, x2, y2, class: 'vk' }, vernier));
     if (k % 5 === 0 && k > 0) {
+      // Labeled in degrees: the vernier adds .5 or a full 1 to the main reading.
       const [tx, ty] = polar(R - 24, phi);
-      el('text', { x: tx, y: ty, class: 'vl', transform: `rotate(${phi * DEG} ${tx} ${ty})` }, vernier, String(k));
+      el('text', { x: tx, y: ty, class: 'vl', transform: `rotate(${phi * DEG} ${tx} ${ty})` }, vernier, k === 5 ? '.5' : '1');
     }
   }
   {
@@ -142,25 +143,25 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
   }
 
   /* ---------- Linear vernier gauge for the offset ----------
-     Main scale in 1/16″ slides with the offset; the fixed vernier has 4
-     divisions spanning 3/16″, so it reads to 1/64″. */
+     Main scale in 1/16″ slides with the offset (a distance, so 0 and up); the
+     fixed vernier has 4 divisions spanning 3/16″, so it reads to 1/64″. */
 
   const PX = 192; // px per inch: 12px per 1/16″
+  const GX = 56; // the index sits left of center, leaving room for the scale
   const GBASE = 30;
   const gauge = $('gauge') as unknown as SVGSVGElement;
   const gaugeScale = el('g', { class: 'main-scale' }, gauge);
   const fracLabel = (sixteenths: number) => {
-    const neg = sixteenths < 0;
-    let n = Math.abs(sixteenths);
+    let n = sixteenths;
     const whole = Math.floor(n / 16);
     n %= 16;
     let d = 16;
     while (n && n % 2 === 0) (n /= 2), (d /= 2);
     const f = n ? `${n}/${d}` : '';
-    return (neg ? '−' : '') + (whole && f ? `${whole} ${f}` : whole ? String(whole) : f || '0');
+    return whole && f ? `${whole} ${f}` : whole ? String(whole) : f || '0';
   };
-  for (let s = -12 * 16; s <= 12 * 16; s++) {
-    const x = CX + (s / 16) * PX;
+  for (let s = 0; s <= 12 * 16; s++) {
+    const x = GX + (s / 16) * PX;
     const len = s % 4 === 0 ? 14 : s % 2 === 0 ? 9 : 6;
     el('line', { x1: x, y1: GBASE, x2: x, y2: GBASE - len, class: s % 4 === 0 ? 'tk major' : 'tk' }, gaugeScale);
     if (s % 4 === 0) el('text', { x, y: GBASE - 19, class: 'tl fr' }, gaugeScale, fracLabel(s));
@@ -168,11 +169,11 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
   el('line', { x1: 0, y1: GBASE, x2: 360, y2: GBASE, class: 'base' }, gauge);
   const gaugeTicks: Element[] = [];
   for (let k = 0; k <= 4; k++) {
-    const x = CX + k * 9;
+    const x = GX + k * 9;
     gaugeTicks.push(el('line', { x1: x, y1: GBASE, x2: x, y2: GBASE + (k % 4 === 0 ? 13 : 9), class: 'vk' }, gauge));
   }
-  el('text', { x: CX + 36 + 6, y: GBASE + 12, class: 'vl start fr' }, gauge, '1/64″');
-  el('line', { x1: CX, y1: GBASE - 20, x2: CX, y2: GBASE + 18, class: 'index' }, gauge);
+  el('text', { x: GX + 36 + 6, y: GBASE + 12, class: 'vl start fr' }, gauge, '1/64″');
+  el('line', { x1: GX, y1: GBASE - 20, x2: GX, y2: GBASE + 18, class: 'index' }, gauge);
 
   /* ---------- Sensor ---------- */
 
@@ -270,6 +271,8 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
   /* ---------- Rendering ---------- */
 
   let wasLevel = false;
+  const DIAL_TAU = 0.18;
+  let dialAngle: number | null = null;
   /** The reading as shown in text: it only moves past a small deadband so digits don't twitch. */
   let shown: Reading | null = null;
   let lastText = 0;
@@ -320,10 +323,13 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     for (const w of Object.values(windows)) (w.sum = 0), (w.n = 0);
   }
 
-  function updateDists(dev: number, dt: number, now: number) {
-    // Snap on big jumps (switching level ↔ plumb ↔ flat), glide otherwise.
-    if (slowDev === null || Math.abs(dev - slowDev) > 3) {
+  let slowRef = '';
+
+  function updateDists(dev: number, ref: string, dt: number, now: number) {
+    // Snap only when switching level ↔ plumb ↔ flat; any other movement glides.
+    if (slowDev === null || ref !== slowRef) {
       slowDev = dev;
+      slowRef = ref;
       resetWindows();
     } else slowDev += (dev - slowDev) * (1 - Math.exp(-dt / SLOW_TAU));
 
@@ -367,15 +373,19 @@ const DISTANCES: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'],
     mode = detectMode(g, mode);
     const r = read(g, mode, cal);
 
-    // Dial: turn the main scale so the reading sits under the index.
-    mainScale.setAttribute('transform', `rotate(${-r.angle * U * DEG} ${CX} ${CY})`);
-    const tenth = Math.round(((r.angle % 1) + 1) % 1 * 10) % 10;
+    // Dial: turn the main scale so the reading sits under the index. A light
+    // extra filter makes it glide; the readout uses the reading itself.
+    dialAngle = dialAngle === null ? r.angle : dialAngle + (r.angle - dialAngle) * (1 - Math.exp(-dt / DIAL_TAU));
+    mainScale.setAttribute('transform', `rotate(${-dialAngle * U * DEG} ${CX} ${CY})`);
+    const tenth = Math.round(((dialAngle % 1) + 1) % 1 * 10) % 10;
     // On a whole degree the index itself is the match, so nothing else lights up.
     vernierTicks.forEach((t, k) => t.classList.toggle('on', k === tenth && k > 0));
 
-    // Offset gauge for the selected distance, on the slower clock.
-    updateDists(r.deviation, dt, now);
-    const off = offsetAt(slowDev!, distance);
+    // Offset gauge for the selected distance, on the slower clock. It shows a
+    // distance, so always the magnitude.
+    const ref = r.mode === 'flat' ? 'flat' : r.angle > 45 ? 'plumb' : 'level';
+    updateDists(r.deviation, ref, dt, now);
+    const off = Math.abs(offsetAt(slowDev!, distance));
     gaugeScale.setAttribute('transform', `translate(${-off * PX} 0)`);
     const q = Math.round(((((off * 16) % 1) + 1) % 1) * 4) % 4;
     gaugeTicks.forEach((t, k) => t.classList.toggle('on', k === q && k > 0));
