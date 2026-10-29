@@ -34,7 +34,8 @@ export const shared = { convPeek: '' };
 /** A short buzz and a soft mechanical click, for every press. */
 export function haptic() {
   try {
-    navigator.vibrate?.(6);
+    // Phone motors need ~10ms to spin up at all; 6ms was too short to feel.
+    navigator.vibrate?.(12);
   } catch {
     /* not supported */
   }
