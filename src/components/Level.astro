@@ -39,7 +39,7 @@
     type Calibration, type LevelMode, type Reading, type Vec3,
   } from '../lib/level';
   import { haptic, load, save } from '../lib/ui';
-  import { toFraction, fractionText } from '../lib/units';
+  import { toFraction } from '../lib/units';
   import { Odometer } from '../lib/odometer';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -68,26 +68,18 @@
 
   /* ---------- Linear vernier dials ----------
      Main scale: 1° per division, sliding under a fixed orange index. Vernier:
-     10 divisions spanning 9°, so the line that meets a main line gives the tenth.
-     That line is labeled with how far off the reading is over 4′. */
-
-  const OVER_AT = 48; // out over 4′…
-  const OVER_DEN = 32; // …to the nearest 1/32″
+     10 divisions spanning 9°, so the line that meets a main line gives the tenth. */
 
   const S = 12; // px per degree
   const DEPTH_X = 64; // thickness of the bottom strip
-  const DEPTH_Y = 84; // the side strip is wider: its labels sit beside the ticks
+  const DEPTH_Y = 76; // the side strip is wider: its labels sit beside the ticks
 
   interface Dial {
     svg: SVGSVGElement;
     scale: Element;
     vernier: Element[];
-    label: Element;
-    place: (a: number) => void;
     vertical: boolean;
     value: number | null;
-    /** The reading the vernier shows, in tenths of a degree. */
-    tenths: number | null;
   }
 
   function buildDial(svg: SVGSVGElement, vertical: boolean): Dial {
@@ -116,18 +108,10 @@
     for (let k = 0; k <= 10; k++) {
       const a = k * 0.9 * S;
       vernier.push(line(a, B, a, B + (k % 5 === 0 ? 13 : 8), 'vk', svg));
+      if (k === 5 || k === 10) text(a, B + 22, 'vl', k === 5 ? '.5' : '1', svg);
     }
-    line(0, B - 20, 0, B + 15, 'index', svg);
-    // On the side dial the label sits beside its line, on the bottom one under it.
-    const label = text(0, 0, vertical ? 'vl fr side' : 'vl fr', '0″', svg);
-    const LB = vertical ? B + 18 : B + 24;
-    const place = (a: number) => {
-      const p = at(a, LB);
-      label.setAttribute('x', String(p.x));
-      label.setAttribute('y', String(p.y));
-    };
-    place(0);
-    return { svg, scale, vernier, label, place, vertical, value: null, tenths: null };
+    line(0, B - 20, 0, B + 20, 'index', svg);
+    return { svg, scale, vernier, vertical, value: null };
   }
 
   const dialX = buildDial($('dial-x') as unknown as SVGSVGElement, false);
@@ -145,16 +129,9 @@
     d.value = d.value === null ? target : d.value + (target - d.value) * (1 - Math.exp(-dt / DIAL_TAU));
     const v = Math.max(-90, Math.min(90, d.value));
     d.scale.setAttribute('transform', d.vertical ? `translate(0 ${v * S})` : `translate(${-v * S} 0)`);
-    // The vernier line that meets a main line (1–10; on a whole degree it's the
-    // index itself). It moves on only once the reading is well into the next tenth.
-    const exact = v * 10;
-    if (d.tenths !== null && Math.abs(exact - d.tenths) < 0.65) return;
-    d.tenths = Math.round(exact);
-    const k = ((d.tenths % 10) + 10) % 10;
+    // The vernier line that meets a main line (1–10; on a whole degree it's the index itself).
+    const k = Math.round((((v % 1) + 1) % 1) * 10);
     d.vernier.forEach((t, i) => t.classList.toggle('on', i === k && k > 0));
-    d.place(k * 0.9 * S);
-    const f = toFraction(Math.abs(offsetAt(d.tenths / 10, OVER_AT)), OVER_DEN);
-    d.label.textContent = fractionText(f) + '″';
   }
 
   /* ---------- Turning text upright ---------- */
@@ -276,8 +253,10 @@
   // sideways it checks level. The number is how far off, 0 when true.
   const ref = (r: Reading) => (r.mode === 'flat' ? 'flat' : r.angle > 45 ? 'level' : 'plumb');
 
-  /* Out over 4′. It only moves to a new step once the reading
+  /* Out over 4′, to the nearest 1/32″. It only moves to a new step once the reading
      is well past the halfway mark, so it doesn't flick between two neighbors. */
+  const OVER_AT = 48;
+  const OVER_DEN = 32;
   let overSteps = -1;
 
   /** Two digits, unlit leading zeros, like the degrees: the width never changes. */
