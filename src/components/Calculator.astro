@@ -1,6 +1,5 @@
 ---
 import Icon from './Icon.astro';
-import FoldHint from './FoldHint.astro';
 ---
 
 <section class="screen" id="screen-calc" aria-label="Calculator">
@@ -18,21 +17,24 @@ import FoldHint from './FoldHint.astro';
   </div>
 
   <div class="keypad-slot" style="--rows: 7"></div>
-  <FoldHint label="Repeat and split" />
   </div>
 
   <div class="fold-more">
   <div class="series" data-mode="repeat">
-    <div class="series-bar">
-      <button class="mode-toggle" id="mode-toggle" aria-label="Switch between repeat and split">
-        <span id="mode-label">Repeat</span>
-        <Icon name="swap" />
-      </button>
-      <div class="counter">
-        <button id="count-dec" aria-label="Fewer"><Icon name="minus" /></button>
-        <output id="count" aria-live="polite">2</output>
-        <button id="count-inc" aria-label="More"><Icon name="plus" /></button>
+    <!-- Repeat or split, and how many times: a switch like the tabs, and the same
+         tuner as the precision dial. -->
+    <div class="switch" role="radiogroup" aria-label="Repeat or split">
+      <div class="switch-thumb"></div>
+      <button class="switch-opt" role="radio" data-mode="repeat" aria-checked="true">Repeat</button>
+      <button class="switch-opt" role="radio" data-mode="split" aria-checked="false">Split</button>
+    </div>
+    <div class="tuner count-tuner" id="count-tuner">
+      <div class="tuner-track h-scroll scrollable" role="radiogroup" aria-label="How many times">
+        {Array.from({ length: 99 }, (_, i) => (
+          <button class="tuner-step" role="radio" aria-checked="false">{i + 1}</button>
+        ))}
       </div>
+      <div class="tuner-index" aria-hidden="true"></div>
     </div>
     <div class="line-scroll h-scroll" id="line-scroll">
       <div class="line" id="line"><div class="ruler"></div></div>
@@ -45,7 +47,7 @@ import FoldHint from './FoldHint.astro';
   import { lex, evaluate, press, series, emptyState, type CalcState, type SeriesMode, type Item } from '../lib/calc';
   import {
     haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, escape, inchHTML, precisionLabel, onLongPress,
-    updateDenoms, onDenom,
+    updateDenoms, onDenom, tuner,
   } from '../lib/ui';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -55,6 +57,7 @@ import FoldHint from './FoldHint.astro';
   const historyEl = $('history');
   const precChip = $('calc-prec');
   const seriesEl = document.querySelector<HTMLElement>('.series')!;
+  const switchOpts = seriesEl.querySelectorAll<HTMLButtonElement>('.switch-opt');
   const lineScroll = $('line-scroll');
   const line = $('line');
   const ruler = line.querySelector<HTMLElement>('.ruler')!;
@@ -65,6 +68,11 @@ import FoldHint from './FoldHint.astro';
   let precision = loadPrecision('calcPrec');
   let mode: SeriesMode = load<SeriesMode>('mode', 'repeat') === 'split' ? 'split' : 'repeat';
   let count = Math.min(99, Math.max(1, load<number>('count', 2)));
+  const countDial = tuner($('count-tuner'), (i) => {
+    count = i + 1;
+    save('count', count);
+    renderSeries();
+  });
 
   /* ---------- Equation rendering ---------- */
 
@@ -158,10 +166,8 @@ import FoldHint from './FoldHint.astro';
 
   function renderSeries() {
     seriesEl.dataset.mode = mode;
-    $('mode-label').textContent = mode === 'repeat' ? 'Repeat' : 'Split';
-    $('count').textContent = String(count);
-    $<HTMLButtonElement>('count-dec').disabled = count <= 1;
-    $<HTMLButtonElement>('count-inc').disabled = count >= 99;
+    switchOpts.forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === mode)));
+    if (countDial.at !== count - 1) countDial.set(count - 1);
 
     // Right after "=", repeat still follows the equation that produced the answer.
     const useHistory = mode === 'repeat' && state.tokens.length === 1 && state.tokens[0] === 'ANS' && state.history;
@@ -262,21 +268,15 @@ import FoldHint from './FoldHint.astro';
     render();
   });
 
-  $('mode-toggle').addEventListener('click', () => {
-    haptic();
-    mode = mode === 'repeat' ? 'split' : 'repeat';
-    save('mode', mode);
-    renderSeries();
-  });
-
-  const step = (d: number) => {
-    haptic();
-    count = Math.min(99, Math.max(1, count + d));
-    save('count', count);
-    renderSeries();
-  };
-  $('count-dec').addEventListener('click', () => step(-1));
-  $('count-inc').addEventListener('click', () => step(1));
+  switchOpts.forEach((b) =>
+    b.addEventListener('click', () => {
+      if (b.dataset.mode === mode) return;
+      haptic();
+      mode = b.dataset.mode as SeriesMode;
+      save('mode', mode);
+      renderSeries();
+    }),
+  );
 
   precChip.addEventListener('click', () => {
     haptic();

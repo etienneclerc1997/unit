@@ -45,15 +45,15 @@ import { PRECISIONS } from '../lib/units';
       the real value is a little larger, a <span class="rd down">−</span> a little smaller.
     </p>
     <!-- A tuning dial: flick or tap; each step clicks into place under the index. -->
-    <div class="prec-dial">
-      <div class="prec-track" role="radiogroup" aria-label="Precision">
+    <div class="tuner prec-tuner">
+      <div class="tuner-track" role="radiogroup" aria-label="Precision">
         {PRECISIONS.map((p) => (
-          <button class="prec-opt" role="radio" data-p={p} aria-checked="false">
+          <button class="tuner-step" role="radio" aria-checked="false">
             <span class="fr">1/{p}</span>
           </button>
         ))}
       </div>
-      <div class="prec-index" aria-hidden="true"></div>
+      <div class="tuner-index" aria-hidden="true"></div>
     </div>
     <button class="pill-btn sheet-done">Done</button>
   </div>
@@ -114,17 +114,9 @@ import { PRECISIONS } from '../lib/units';
     () => {
       // Overflow can't be clipped sideways in a vertical scroller; never let focus shift it.
       if (viewport.scrollLeft) viewport.scrollLeft = 0;
-      viewport.classList.toggle('scrolled', viewport.scrollTop > 24);
       if (pendingMore && viewport.scrollTop <= 1) syncMore();
     },
     { passive: true },
-  );
-
-  screens.forEach((s) =>
-    s.querySelector('.fold-hint')?.addEventListener('click', () => {
-      haptic();
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
-    }),
   );
 
   /* ---------- Swipe between screens ---------- */
@@ -180,7 +172,7 @@ import { PRECISIONS } from '../lib/units';
     const go = Math.abs(dx) > w * 0.25 || Math.abs(velocity) > 0.4;
     const next = index() + (dx < 0 ? 1 : -1);
     if (go && next >= 0 && next < TABS.length) {
-      haptic();
+      haptic(false);
       setTab(TABS[next]);
     }
   };

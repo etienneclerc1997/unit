@@ -31,15 +31,15 @@ export function precisionLabel(p: number): string {
 /** State shared across screens: the Convert tab peeks at the last converted value (as HTML). */
 export const shared = { convPeek: '' };
 
-/** A short buzz and a soft mechanical click, for every press. */
-export function haptic() {
+/** A short buzz, and a soft mechanical click for presses (not for swipes or the level). */
+export function haptic(sound = true) {
   try {
     // Phone motors need ~10ms to spin up at all; 6ms was too short to feel.
     navigator.vibrate?.(12);
   } catch {
     /* not supported */
   }
-  click();
+  if (sound) click();
 }
 
 /* The click: a few milliseconds of filtered noise, made once and replayed. As an
@@ -102,25 +102,60 @@ export function loadPrecision(name: string, fallback: Precision = DEFAULT_PRECIS
   return (PRECISIONS as readonly number[]).includes(p) ? (p as Precision) : fallback;
 }
 
+/* ---------- Tuner ----------
+   A scale that scrolls under a fixed index and snaps to each step, like the dial
+   on a radio: flick it or tap a step. Every step that passes the index clicks. */
+
+export interface Tuner {
+  /** Put step `i` under the index, without a click or a change event. */
+  set(i: number): void;
+  readonly at: number;
+}
+
+export function tuner(root: HTMLElement, onStep: (i: number) => void): Tuner {
+  const track = root.querySelector<HTMLElement>('.tuner-track')!;
+  const steps = Array.from(track.querySelectorAll<HTMLButtonElement>('.tuner-step'));
+  const width = () => steps[0].offsetWidth;
+  let at = -1;
+  const mark = (i: number) => {
+    at = i;
+    steps.forEach((b, n) => b.setAttribute('aria-checked', String(n === i)));
+  };
+  track.addEventListener(
+    'scroll',
+    () => {
+      // Hidden (display: none) it loses its scroll; that isn't a turn of the dial.
+      if (!width()) return;
+      const i = Math.max(0, Math.min(steps.length - 1, Math.round(track.scrollLeft / width())));
+      if (i === at) return;
+      mark(i);
+      haptic();
+      onStep(i);
+    },
+    { passive: true },
+  );
+  steps.forEach((b, i) => b.addEventListener('click', () => track.scrollTo({ left: i * width(), behavior: 'smooth' })));
+  // While hidden it can't scroll; line it up again once it has a size.
+  new ResizeObserver(() => at >= 0 && (track.scrollLeft = at * width())).observe(track);
+  return {
+    set(i) {
+      mark(i);
+      track.scrollLeft = i * width();
+    },
+    get at() {
+      return at;
+    },
+  };
+}
+
 /* ---------- Precision sheet ---------- */
 
 let onPick: ((p: Precision) => void) | null = null;
-let dialAt = -1; // the step under the index
-
-const dialTrack = () => document.querySelector<HTMLElement>('.prec-track')!;
-const dialSteps = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.prec-opt'));
-const stepWidth = () => dialSteps()[0].offsetWidth;
-
-function markStep(i: number) {
-  dialAt = i;
-  dialSteps().forEach((b, n) => b.setAttribute('aria-checked', String(n === i)));
-}
+let precDial: Tuner;
 
 export function openPrecisionSheet(current: Precision, pick: (p: Precision) => void) {
   onPick = pick;
-  const i = Math.max(0, PRECISIONS.indexOf(current));
-  markStep(i);
-  dialTrack().scrollLeft = i * stepWidth();
+  precDial.set(Math.max(0, PRECISIONS.indexOf(current)));
   document.body.classList.add('sheet-open');
   document.querySelector<HTMLElement>('.sheet')?.setAttribute('aria-hidden', 'false');
 }
@@ -134,22 +169,8 @@ export function closePrecisionSheet() {
 export function initPrecisionSheet() {
   document.querySelector('.sheet-scrim')?.addEventListener('click', closePrecisionSheet);
   document.querySelector('.sheet-done')?.addEventListener('click', () => (haptic(), closePrecisionSheet()));
-  // Turning the dial: every step that passes the index clicks and applies at once.
-  const track = dialTrack();
-  track.addEventListener(
-    'scroll',
-    () => {
-      const i = Math.max(0, Math.min(PRECISIONS.length - 1, Math.round(track.scrollLeft / stepWidth())));
-      if (i === dialAt || !onPick) return;
-      markStep(i);
-      haptic();
-      onPick(PRECISIONS[i]);
-    },
-    { passive: true },
-  );
-  dialSteps().forEach((b, i) =>
-    b.addEventListener('click', () => track.scrollTo({ left: i * stepWidth(), behavior: 'smooth' })),
-  );
+  // Turning the dial applies at once.
+  precDial = tuner(document.querySelector<HTMLElement>('.sheet .tuner')!, (i) => onPick?.(PRECISIONS[i]));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closePrecisionSheet();
   });

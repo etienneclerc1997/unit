@@ -251,10 +251,10 @@
   // sideways it checks level. The number is how far off, 0 when true.
   const ref = (r: Reading) => (r.mode === 'flat' ? 'flat' : r.angle > 45 ? 'level' : 'plumb');
 
-  /* Out over 4′, to the nearest 1/32″. It only moves to a new step once the reading
+  /* Out over 4′, to the nearest 1/64″. It only moves to a new step once the reading
      is well past the halfway mark, so it doesn't flick between two neighbors. */
   const OVER_AT = 48;
-  const OVER_DEN = 32;
+  const OVER_DEN = 64;
   let overSteps = -1;
 
   /** Two digits, unlit leading zeros, like the degrees: the width never changes. */
@@ -270,14 +270,12 @@
     overSteps = Math.round(exact);
     const f = toFraction(exact / OVER_DEN, OVER_DEN);
     const frac = f.num > 0;
-    const mark = f.dir > 0 ? '+' : f.dir < 0 ? '−' : '';
     overEl.innerHTML =
       `<span class="ov-whole">${digits(Math.min(f.whole, 99), f.whole > 0 || !frac)}</span>` +
       `<span class="ov-frac"><span class="ov-num">${digits(f.num, frac)}</span>` +
       `<span class="ov-slash${frac ? '' : ' odo-lead'}">/</span>` +
       `<span class="ov-den">${digits(frac ? f.den : 0, frac)}</span></span>` +
-      `<span class="ov-unit">″</span>` +
-      `<span class="ov-rd${mark === '+' ? ' up' : mark ? ' down' : ''}">${mark || '+'}</span>`;
+      `<span class="ov-unit">″</span>`;
   }
 
   function renderText(r: Reading) {
@@ -336,7 +334,7 @@
     const isLevel = Math.abs(r.deviation) < 0.05;
     if (isLevel !== wasLevel) {
       screen.classList.toggle('is-level', isLevel);
-      if (isLevel) haptic();
+      if (isLevel) haptic(false);
       wasLevel = isLevel;
     }
 

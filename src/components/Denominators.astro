@@ -1,5 +1,6 @@
 ---
-// One-tap denominators, shown over the keypad's top row right after "/".
+// One-tap denominators, shown over the keypad's top row right after "/". Drawn as
+// the marks on a tape measure: the coarser the step, the longer its mark.
 interface Props {
   id: string;
 }
@@ -8,9 +9,10 @@ const DENOMS = [2, 4, 8, 16, 32, 64];
 ---
 
 <div class="denoms" id={id} aria-hidden="true" role="group" aria-label="Denominator">
-  {DENOMS.map((d) => (
-    <button class="denom" data-d={d} tabindex="-1">
-      <span class="denom-slash">/</span>{d}
+  {DENOMS.map((d, i) => (
+    <button class="denom" data-d={d} tabindex="-1" style={`--i: ${i}`}>
+      <span class="denom-mark"></span>
+      <span class="denom-label">/{d}</span>
     </button>
   ))}
 </div>
