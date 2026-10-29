@@ -44,13 +44,18 @@ import { PRECISIONS } from '../lib/units';
       Fractions round to the nearest step and show in their simplest form. A <span class="rd up">+</span> means
       the real value is a little larger, a <span class="rd down">−</span> a little smaller.
     </p>
-    <div class="prec-grid" role="radiogroup">
-      {PRECISIONS.map((p) => (
-        <button class="prec-opt" role="radio" data-p={p} aria-checked="false">
-          <span class="fr">1/{p}</span>
-        </button>
-      ))}
+    <!-- A tuning dial: flick or tap; each step clicks into place under the index. -->
+    <div class="prec-dial">
+      <div class="prec-track" role="radiogroup" aria-label="Precision">
+        {PRECISIONS.map((p) => (
+          <button class="prec-opt" role="radio" data-p={p} aria-checked="false">
+            <span class="fr">1/{p}</span>
+          </button>
+        ))}
+      </div>
+      <div class="prec-index" aria-hidden="true"></div>
     </div>
+    <button class="pill-btn sheet-done">Done</button>
   </div>
 </App>
 

@@ -1,18 +1,20 @@
-/* Neutral canvas from DESIGN-elevenlabs.md; color is reserved for function:
-   orange is the main accent (=, caret, focus, selection) and marks split;
-   blue marks repeat; rounding marks are orange + / blue −. */
+/* Flat and precise, like a well-made instrument: neutral greys, flat panels,
+   hairlines only where they mean something, and a mono face for labels and
+   readings. Color is reserved for function: orange is the main accent (caret,
+   indicator dots, selection) and marks split; blue marks repeat; rounding
+   marks are orange + / blue −. */
 :root {
-  --ink: #0c0a09;
-  --primary: #1c1917;
-  --body: #4e4e4e;
-  --muted: #777169;
-  --muted-soft: #a8a29e;
-  --hairline: #e7e5e4;
-  --hairline-strong: #d6d3d1;
-  --canvas: #f5f5f4;
-  --surface: #ffffff;
-  --surface-strong: #eeedeb;
-  --surface-press: #e2e0dd;
+  --ink: #111111;
+  --primary: #111111;
+  --body: #4d4d4d;
+  --muted: #8a8a8a;
+  --muted-soft: #b5b5b5;
+  --hairline: #e0e0e0;
+  --hairline-strong: #cbcbcb;
+  --canvas: #ececec;
+  --surface: #f7f7f7;
+  --surface-strong: #e1e1e1;
+  --surface-press: #d6d6d6;
 
   --blue: #1f5fff;
   --blue-soft: #e9efff;
@@ -33,6 +35,7 @@
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   --font: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
 
   --key-gap: 8px;
   /* One row height for both keypads, so they line up between screens. */
@@ -84,9 +87,23 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-/* Fractions render as true diagonal fractions. */
+/* Labels: small mono capitals, like the print on an instrument panel. */
+.label {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Fractions render as true diagonal fractions, in the text face even inside
+   mono labels (the mono has no fraction forms). Numbers are read in the text
+   face; the mono is for words. */
 .fr {
+  font-family: var(--font);
   font-variant-numeric: diagonal-fractions;
+  letter-spacing: 0;
 }
 
 /* Rounding mark, raised like an exponent: the real value is a little larger (+) or smaller (−). */
@@ -247,14 +264,15 @@ button:focus-visible {
 
 /* ---------- Tabs ---------- */
 
+/* A black pill slides under the active tab; the others are just print. */
 .tabs {
   position: relative;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  background: var(--surface-strong);
   border-radius: var(--pill);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
   padding: 4px;
-  height: 48px;
+  height: 46px;
   flex-shrink: 0;
 }
 
@@ -264,9 +282,8 @@ button:focus-visible {
   bottom: 4px;
   left: 4px;
   width: calc((100% - 8px) / 3);
-  background: var(--surface);
+  background: var(--primary);
   border-radius: var(--pill);
-  box-shadow: var(--shadow);
   transform: translateX(calc(var(--i, 0) * 100%));
   transition: transform 0.45s var(--ease);
 }
@@ -279,8 +296,11 @@ button:focus-visible {
   justify-content: center;
   gap: 8px;
   min-width: 0;
-  font-size: 15px;
-  font-weight: 500;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
   border-radius: var(--pill);
   transition: color 0.3s ease;
@@ -294,7 +314,7 @@ button:focus-visible {
 }
 
 .tab[aria-selected='true'] {
-  color: var(--ink);
+  color: #fff;
 }
 
 /* ---------- Chips ---------- */
@@ -302,14 +322,14 @@ button:focus-visible {
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   height: 28px;
   padding: 0 10px;
   border-radius: var(--pill);
-  background: var(--surface-strong);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
   color: var(--body);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 450;
   transition: background-color 0.15s ease;
 }
 
@@ -333,6 +353,8 @@ button:focus-visible {
   gap: var(--key-gap);
 }
 
+/* Flat keys: light for numbers, outlined for functions, grey for operators,
+   black for =. */
 .key {
   position: relative;
   display: grid;
@@ -341,7 +363,7 @@ button:focus-visible {
   border-radius: var(--r-xl);
   background: var(--surface);
   font-size: 24px;
-  font-weight: 400;
+  font-weight: 300;
   color: var(--ink);
   overflow: hidden;
   transition:
@@ -352,7 +374,7 @@ button:focus-visible {
 
 .key:active {
   background: var(--surface-press);
-  transform: scale(0.95);
+  transform: scale(0.96);
   transition-duration: 0.05s;
 }
 
@@ -366,15 +388,21 @@ button:focus-visible {
 }
 
 .key.fn {
-  background: var(--surface-strong);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
   font-size: 18px;
-  font-weight: 500;
+  font-weight: 400;
+}
+
+.key.fn:active {
+  background: var(--surface-strong);
 }
 
 .key.eq {
   background: var(--primary);
   color: #fff;
-  font-size: 28px;
+  font-size: 26px;
+  font-weight: 300;
 }
 
 .key.eq:active {
@@ -382,8 +410,11 @@ button:focus-visible {
 }
 
 .key.small-label {
-  font-size: 15px;
-  font-weight: 500;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .key svg {
@@ -508,22 +539,48 @@ button:focus-visible {
   align-items: flex-start;
   width: 100%;
   height: 100%;
-  padding: 10px 14px 11px;
+  padding: 12px 14px 11px;
   border-radius: var(--r-xl);
   background: var(--surface);
   text-align: left;
-  box-shadow: inset 0 0 0 1px var(--hairline);
   transition: box-shadow 0.25s var(--ease);
 }
 
+/* The field being typed in: a fine ink outline and an orange dot. */
 .field[aria-pressed='true'] {
-  box-shadow: inset 0 0 0 2px var(--ink), var(--shadow);
+  box-shadow: inset 0 0 0 1px var(--ink);
 }
 
 .field-label {
-  font-size: 13px;
-  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
+}
+
+.field-label::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-right: -11px;
+  border-radius: 50%;
+  background: var(--orange);
+  opacity: 0;
+  transition: opacity 0.2s ease, margin-right 0.25s var(--ease);
+}
+
+.field[aria-pressed='true'] .field-label {
+  color: var(--ink);
+}
+
+.field[aria-pressed='true'] .field-label::before {
+  margin-right: 0;
+  opacity: 1;
 }
 
 .field-value {
@@ -532,7 +589,7 @@ button:focus-visible {
   width: 100%;
   min-width: 0;
   font-size: 26px;
-  font-weight: 350;
+  font-weight: 300;
   letter-spacing: -0.4px;
   line-height: 1.2;
   white-space: nowrap;
@@ -552,10 +609,11 @@ button:focus-visible {
 }
 
 .field-unit {
-  margin-left: 0.18em;
-  font-size: 0.6em;
-  font-weight: 400;
-  letter-spacing: 0;
+  margin-left: 0.3em;
+  font-family: var(--mono);
+  font-size: 0.5em;
+  font-weight: 450;
+  letter-spacing: 0.02em;
   color: var(--muted);
 }
 
@@ -563,6 +621,7 @@ button:focus-visible {
 .field[data-key='ftFrac'] .field-unit,
 .field[data-key='inFrac'] .field-unit {
   margin-left: 0.04em;
+  font-family: var(--font);
   font-size: 0.85em;
 }
 
@@ -580,8 +639,8 @@ button:focus-visible {
   position: absolute;
   top: 8px;
   right: 8px;
-  height: 26px;
-  padding: 0 8px;
+  height: 24px;
+  padding: 0 7px 0 8px;
   font-size: 12px;
 }
 
@@ -749,7 +808,6 @@ button:focus-visible {
   padding: 12px 18px 12px;
   border-radius: var(--r-xxl);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--hairline);
   overflow: hidden;
 }
 
@@ -846,7 +904,7 @@ button:focus-visible {
   min-height: 30px;
   text-align: right;
   font-size: 24px;
-  font-weight: 400;
+  font-weight: 300;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -873,7 +931,6 @@ button:focus-visible {
   flex-shrink: 0;
   border-radius: var(--r-xxl);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--hairline);
   padding: 8px 8px 6px;
   --mode: var(--blue);
   --mode-soft: var(--blue-soft);
@@ -900,9 +957,10 @@ button:focus-visible {
   border-radius: var(--pill);
   background: var(--mode-soft);
   color: var(--mode);
+  font-family: var(--mono);
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.96px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   transition:
     background-color 0.3s ease,
@@ -932,12 +990,12 @@ button:focus-visible {
   width: 40px;
   height: 40px;
   border-radius: var(--pill);
-  background: var(--surface-strong);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
   transition: background-color 0.15s ease, transform 0.15s var(--ease), opacity 0.2s ease;
 }
 
 .counter button:active {
-  background: var(--surface-press);
+  background: var(--surface-strong);
   transform: scale(0.92);
 }
 
@@ -954,7 +1012,7 @@ button:focus-visible {
   min-width: 36px;
   text-align: center;
   font-size: 20px;
-  font-weight: 500;
+  font-weight: 300;
 }
 
 .line-scroll {
@@ -984,7 +1042,8 @@ button:focus-visible {
   right: var(--pad-r);
   top: 40px;
   height: 6px;
-  background: repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px var(--period));
+  /* Minor marks are dots. */
+  background: radial-gradient(circle at 1px 50%, var(--muted-soft) 1.1px, transparent 1.6px) 0 0 / var(--period) 100% repeat-x;
 }
 
 .pt {
@@ -1003,7 +1062,7 @@ button:focus-visible {
   display: flex;
   align-items: flex-end;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 450;
   color: var(--body);
   white-space: nowrap;
 }
@@ -1043,7 +1102,11 @@ button:focus-visible {
   height: 64px;
   display: grid;
   place-items: center;
-  font-size: 13px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted-soft);
 }
 
@@ -1186,8 +1249,11 @@ button:focus-visible {
 }
 
 .lvl-over-dist {
-  font-size: 13px;
-  font-weight: 500;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -1197,8 +1263,11 @@ button:focus-visible {
   border-radius: var(--pill);
   background: var(--primary);
   color: #fff;
-  font-size: 14px;
-  font-weight: 500;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   transition: background-color 0.15s ease, transform 0.15s var(--ease);
 }
 
@@ -1210,16 +1279,17 @@ button:focus-visible {
 .pill-btn.small {
   height: 32px;
   padding: 0 14px;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .pill-btn.quiet {
-  background: var(--surface-strong);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
   color: var(--ink);
 }
 
 .pill-btn.quiet:active {
-  background: var(--surface-press);
+  background: var(--surface-strong);
 }
 
 /* One face for every orientation: readout in the middle, a vernier dial along
@@ -1236,7 +1306,6 @@ button:focus-visible {
   grid-template-rows: 1fr 64px;
   border-radius: var(--r-xxl);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--hairline);
   overflow: hidden;
 }
 
@@ -1263,16 +1332,18 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-family: var(--mono);
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.96px;
+  font-weight: 450;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink);
 }
 
 .lvl-dev {
-  font-size: 14px;
-  font-weight: 500;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 400;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1285,8 +1356,8 @@ button:focus-visible {
 
 /* The "level" lamp, like an indicator LED. */
 .lamp {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--hairline-strong);
   transition: background-color 0.15s ease, box-shadow 0.15s ease;
@@ -1333,8 +1404,9 @@ svg .tk.major {
 }
 
 svg .tl {
-  font-size: 10px;
-  font-weight: 500;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 450;
   fill: var(--body);
   text-anchor: middle;
   dominant-baseline: middle;
@@ -1358,6 +1430,7 @@ svg .vk.on {
 }
 
 svg .vl {
+  font-family: var(--mono);
   font-size: 9px;
   fill: var(--muted-soft);
   text-anchor: middle;
@@ -1455,10 +1528,12 @@ body.sheet-open .sheet {
 }
 
 .sheet h2 {
-  margin: 0 0 4px;
-  font-size: 20px;
-  font-weight: 500;
-  letter-spacing: 0;
+  margin: 4px 0 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .sheet p {
@@ -1468,24 +1543,77 @@ body.sheet-open .sheet {
   color: var(--muted);
 }
 
-.prec-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+.prec-dial {
+  position: relative;
+  margin: 4px -20px 20px;
+}
+
+/* The scale scrolls under a fixed index, snapping to each step. Minor marks
+   are dots, every step gets a line, and the edges fade out like a drum. */
+.prec-track {
+  --step: 84px;
+  display: flex;
+  overflow-x: auto;
+  padding: 0 calc(50% - var(--step) / 2);
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  touch-action: pan-x;
+  mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+}
+
+.prec-track::-webkit-scrollbar {
+  display: none;
 }
 
 .prec-opt {
-  height: 56px;
-  border-radius: var(--r-xl);
-  background: var(--canvas);
-  font-size: 22px;
-  font-weight: 400;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  position: relative;
+  flex: 0 0 var(--step);
+  height: 92px;
+  padding-top: 8px;
+  display: flex;
+  justify-content: center;
+  scroll-snap-align: center;
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--muted-soft);
+  background: radial-gradient(circle, var(--muted-soft) 1px, transparent 1.6px) 50% calc(100% - 4px) / 14px 8px
+    repeat-x;
+  transition: color 0.2s ease;
+}
+
+.prec-opt::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 1.5px;
+  height: 26px;
+  margin-left: -0.75px;
+  border-radius: 1px;
+  background: var(--ink);
 }
 
 .prec-opt[aria-checked='true'] {
-  background: var(--primary);
-  color: #fff;
+  color: var(--ink);
+}
+
+/* The index, like the needle on a tuner. */
+.prec-index {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 2px;
+  height: 40px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--orange);
+  pointer-events: none;
+}
+
+.sheet-done {
+  width: 100%;
+  height: 48px;
 }
 
 /* ---------- Small screens ---------- */

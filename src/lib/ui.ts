@@ -31,11 +31,45 @@ export function precisionLabel(p: number): string {
 /** State shared across screens: the Convert tab peeks at the last converted value (as HTML). */
 export const shared = { convPeek: '' };
 
+/** A short buzz and a soft mechanical click, for every press. */
 export function haptic() {
   try {
     navigator.vibrate?.(6);
   } catch {
     /* not supported */
+  }
+  click();
+}
+
+/* The click: a few milliseconds of filtered noise, made once and replayed. As an
+   "ambient" sound it follows the silent switch on iPhone and media volume elsewhere. */
+let audio: AudioContext | null = null;
+let clickBuffer: AudioBuffer | null = null;
+
+function click() {
+  try {
+    if (!audio) {
+      const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+      if (session) session.type = 'ambient';
+      audio = new AudioContext();
+      const n = Math.round(audio.sampleRate * 0.012);
+      clickBuffer = audio.createBuffer(1, n, audio.sampleRate);
+      const data = clickBuffer.getChannelData(0);
+      for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (n / 7));
+    }
+    if (audio.state === 'suspended') audio.resume();
+    const src = audio.createBufferSource();
+    src.buffer = clickBuffer;
+    const tone = audio.createBiquadFilter();
+    tone.type = 'bandpass';
+    tone.frequency.value = 3400;
+    tone.Q.value = 0.8;
+    const level = audio.createGain();
+    level.gain.value = 0.28;
+    src.connect(tone).connect(level).connect(audio.destination);
+    src.start();
+  } catch {
+    /* no audio */
   }
 }
 
@@ -70,12 +104,22 @@ export function loadPrecision(name: string, fallback: Precision = DEFAULT_PRECIS
 /* ---------- Precision sheet ---------- */
 
 let onPick: ((p: Precision) => void) | null = null;
+let dialAt = -1; // the step under the index
+
+const dialTrack = () => document.querySelector<HTMLElement>('.prec-track')!;
+const dialSteps = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.prec-opt'));
+const stepWidth = () => dialSteps()[0].offsetWidth;
+
+function markStep(i: number) {
+  dialAt = i;
+  dialSteps().forEach((b, n) => b.setAttribute('aria-checked', String(n === i)));
+}
 
 export function openPrecisionSheet(current: Precision, pick: (p: Precision) => void) {
   onPick = pick;
-  document.querySelectorAll<HTMLButtonElement>('.prec-opt').forEach((b) => {
-    b.setAttribute('aria-checked', String(Number(b.dataset.p) === current));
-  });
+  const i = Math.max(0, PRECISIONS.indexOf(current));
+  markStep(i);
+  dialTrack().scrollLeft = i * stepWidth();
   document.body.classList.add('sheet-open');
   document.querySelector<HTMLElement>('.sheet')?.setAttribute('aria-hidden', 'false');
 }
@@ -88,13 +132,23 @@ export function closePrecisionSheet() {
 
 export function initPrecisionSheet() {
   document.querySelector('.sheet-scrim')?.addEventListener('click', closePrecisionSheet);
-  document.querySelectorAll<HTMLButtonElement>('.prec-opt').forEach((b) => {
-    b.addEventListener('click', () => {
+  document.querySelector('.sheet-done')?.addEventListener('click', () => (haptic(), closePrecisionSheet()));
+  // Turning the dial: every step that passes the index clicks and applies at once.
+  const track = dialTrack();
+  track.addEventListener(
+    'scroll',
+    () => {
+      const i = Math.max(0, Math.min(PRECISIONS.length - 1, Math.round(track.scrollLeft / stepWidth())));
+      if (i === dialAt || !onPick) return;
+      markStep(i);
       haptic();
-      onPick?.(Number(b.dataset.p) as Precision);
-      closePrecisionSheet();
-    });
-  });
+      onPick(PRECISIONS[i]);
+    },
+    { passive: true },
+  );
+  dialSteps().forEach((b, i) =>
+    b.addEventListener('click', () => track.scrollTo({ left: i * stepWidth(), behavior: 'smooth' })),
+  );
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closePrecisionSheet();
   });
