@@ -1232,7 +1232,7 @@ button:focus-visible {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 76px;
+  grid-template-columns: 1fr 84px;
   grid-template-rows: 1fr 64px;
   border-radius: var(--r-xxl);
   background: var(--surface);
@@ -1357,11 +1357,17 @@ svg .vk.on {
   stroke: var(--orange);
 }
 
+/* How far off over 4′, on the vernier line that lines up. */
 svg .vl {
-  font-size: 9px;
-  fill: var(--muted-soft);
+  font-size: 13px;
+  font-weight: 600;
+  fill: var(--ink);
   text-anchor: middle;
   dominant-baseline: middle;
+}
+
+svg .vl.side {
+  text-anchor: start;
 }
 
 svg .index {
