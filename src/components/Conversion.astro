@@ -33,7 +33,7 @@ import Icon from './Icon.astro';
   import { FIELDS, type FieldDef, type FieldKey } from '../lib/units';
   import {
     haptic, shared, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel,
-    onLongPress, onTap, roundHTML, inchHTML, updateDenoms, onDenom,
+    onLongPress, roundHTML, inchHTML, updateDenoms, onDenom,
   } from '../lib/ui';
 
   const fieldEls = new Map<FieldKey, HTMLButtonElement>();
@@ -58,17 +58,20 @@ import Icon from './Icon.astro';
   const unitHTML = (u: string) => `<span class="field-unit">${u}</span>`;
   const CARET = '<span class="caret"></span>';
   const PLACEHOLDER = '<span class="ph">0</span>';
+  // Typed spaces don't break, or one at the end (as in "3 ", before "1/2") would vanish.
+  const NBSP = String.fromCharCode(160);
+  const typedHTML = (t: string) => prettyHTML(t.replace(/ /g, NBSP));
 
   /** Feet are typed as `5'3 1/2`: ′ is always shown, ″ once the inches part has started. */
   function feetHTML(text: string, caret: string, active: boolean): string {
     const t = text.replace(/"$/, '').replace("' ", "'");
     const i = t.indexOf("'");
-    if (i < 0) return (t ? prettyHTML(t) : '') + caret + (t ? '' : PLACEHOLDER) + unitHTML('′');
+    if (i < 0) return (t ? typedHTML(t) : '') + caret + (t ? '' : PLACEHOLDER) + unitHTML('′');
     const inch = t.slice(i + 1);
     const showInch = inch !== '' || active;
     return (
-      prettyHTML(t.slice(0, i)) + unitHTML('′') +
-      (showInch ? '&ensp;' + prettyHTML(inch) + caret + unitHTML('″') : caret)
+      typedHTML(t.slice(0, i)) + unitHTML('′') +
+      (showInch ? '&ensp;' + typedHTML(inch) + caret + unitHTML('″') : caret)
     );
   }
 
@@ -78,7 +81,7 @@ import Icon from './Icon.astro';
     if (f.key === 'ftFrac') html = feetHTML(text, caret, active);
     else {
       const unit = f.unit === '"' ? '″' : f.unit;
-      html = (text ? prettyHTML(text) + caret : caret + PLACEHOLDER) + (unit ? unitHTML(unit) : '');
+      html = (text ? typedHTML(text) + caret : caret + PLACEHOLDER) + (unit ? unitHTML(unit) : '');
     }
     if (active && fresh && text) html = `<span class="sel">${html}</span>`;
     // Mark rounding on values we formatted (not on what's being typed).
@@ -164,8 +167,9 @@ import Icon from './Icon.astro';
   // The keypad is shared with the calculator, whose key names it uses.
   const onConvert = () => document.querySelector('.app')?.getAttribute('data-tab') === 'convert';
   const KEY: Record<string, string> = { '⌫': 'back', AC: 'clear' };
-  onTap(document.querySelector('.keypad')!, '.key', (k) => {
-    if (!onConvert() || k.matches('.extra, .off')) return;
+  document.querySelector('.keypad')!.addEventListener('click', (e) => {
+    const k = (e.target as HTMLElement).closest<HTMLButtonElement>('.key');
+    if (!k || !onConvert() || k.matches('.extra, .off')) return;
     haptic();
     input(KEY[k.dataset.k!] ?? k.dataset.k!);
   });

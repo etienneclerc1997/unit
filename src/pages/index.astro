@@ -55,7 +55,7 @@ import { PRECISIONS } from '../lib/units';
 </App>
 
 <script>
-  import { haptic, shared, load, save, initPrecisionSheet, suppressNextClick } from '../lib/ui';
+  import { haptic, shared, load, save, initPrecisionSheet, suppressNextClick, rescueDroppedTaps } from '../lib/ui';
 
   const TABS = ['convert', 'calc', 'level'];
   const app = document.querySelector<HTMLElement>('.app')!;
@@ -183,6 +183,7 @@ import { PRECISIONS } from '../lib/units';
   viewport.addEventListener('pointercancel', endSwipe);
 
   initPrecisionSheet();
+  rescueDroppedTaps();
   // Restore without animating.
   app.classList.add('instant');
   setTab(load<string>('tab', 'convert'));

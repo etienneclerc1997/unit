@@ -171,39 +171,49 @@ export function updateDenoms(el: HTMLElement, before: string | null) {
 }
 
 export function onDenom(el: HTMLElement, pick: (digits: string[]) => void) {
-  onTap(el, '.denom', (b) => {
-    if (!el.classList.contains('show')) return;
+  el.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.denom');
+    if (!b || !el.classList.contains('show')) return;
     haptic();
     pick([...b.dataset.d!]);
   });
 }
 
 /**
- * Taps on `selector` inside `root`, on pointerup rather than click. Phones drop the
- * click of a tap that comes right after a swipe (it only stops the swipe's fling),
- * which made the keypad ignore the first key after every screen change. A press
- * that moved, was taken over by scrolling, or ended in a long press doesn't count;
- * keyboard activation (a click with no pointer) still does.
+ * Phones drop the click of a tap that comes right after a swipe (the tap only
+ * stops the swipe's fling), so for a moment after every screen change buttons
+ * seemed dead. When a clean tap on a button gets no click, click it ourselves,
+ * and ignore the real one should it turn up late.
  */
-export function onTap(root: HTMLElement, selector: string, fn: (el: HTMLElement) => void) {
-  const hit = (e: Event) => (e.target as HTMLElement).closest<HTMLElement>(selector);
-  let down: { el: HTMLElement; id: number; x: number; y: number } | null = null;
-  root.addEventListener('pointerdown', (e) => {
-    const el = hit(e);
-    down = el && e.button === 0 ? { el, id: e.pointerId, x: e.clientX, y: e.clientY } : null;
-  });
-  root.addEventListener('pointercancel', () => (down = null));
-  root.addEventListener('pointerup', (e) => {
+export function rescueDroppedTaps() {
+  let down: { el: HTMLButtonElement; id: number; x: number; y: number } | null = null;
+  const button = (e: Event) => (e.target as HTMLElement).closest?.<HTMLButtonElement>('button') ?? null;
+  document.addEventListener('pointerdown', (e) => {
+    const el = button(e);
+    down = el && e.isPrimary ? { el, id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+  }, true);
+  document.addEventListener('pointercancel', () => (down = null), true);
+  document.addEventListener('pointerup', (e) => {
     const d = down;
     down = null;
-    if (!d || e.pointerId !== d.id || hit(e) !== d.el || longPressed.has(d.el)) return;
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12 || (d.el as HTMLButtonElement).disabled) return;
-    fn(d.el);
-  });
-  root.addEventListener('click', (e) => {
-    const el = hit(e);
-    if (el && e.detail === 0) fn(el);
-  });
+    if (!d || e.pointerId !== d.id || button(e) !== d.el) return;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12) return;
+    let clicked = false;
+    const seen = () => (clicked = true);
+    d.el.addEventListener('click', seen, { capture: true, once: true });
+    setTimeout(() => {
+      d.el.removeEventListener('click', seen, { capture: true });
+      if (clicked || d.el.disabled || !d.el.isConnected) return;
+      d.el.click();
+      const late = (ev: Event) => {
+        if (!ev.isTrusted) return;
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+      };
+      d.el.addEventListener('click', late, { capture: true });
+      setTimeout(() => d.el.removeEventListener('click', late, { capture: true }), 500);
+    }, 80);
+  }, true);
 }
 
 /**
@@ -220,19 +230,14 @@ export function suppressNextClick(el: HTMLElement, e: PointerEvent) {
   setTimeout(() => el.removeEventListener('click', stop, { capture: true }), 80);
 }
 
-/** Elements whose current press turned into a long press (onTap skips them). */
-const longPressed = new WeakSet<HTMLElement>();
-
 /** Long-press support (e.g. hold ⌫ to clear). Returns true from the click handler if a long press fired. */
 export function onLongPress(el: HTMLElement, fn: () => void, ms = 450) {
   let timer = 0;
   let fired = false;
   el.addEventListener('pointerdown', () => {
     fired = false;
-    longPressed.delete(el);
     timer = window.setTimeout(() => {
       fired = true;
-      longPressed.add(el);
       fn();
     }, ms);
   });

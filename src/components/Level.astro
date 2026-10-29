@@ -1,11 +1,13 @@
 ---
-import Icon from './Icon.astro';
-import FoldHint from './FoldHint.astro';
----
 
 <section class="screen" id="screen-level" data-screen="level" aria-label="Level">
   <div class="fold-main">
     <div class="lvl-bar">
+      <!-- How far the line drifts over a 4′ level, the length you'd check it with. -->
+      <div class="lvl-over" aria-label="Out over 4 feet">
+        <span class="lvl-over-val" id="lvl-over">0″</span>
+        <span class="lvl-over-dist">over 4′</span>
+      </div>
       <button class="pill-btn small" id="lvl-zero" aria-label="Calibrate: make this position read zero">Zero</button>
       <button class="pill-btn small quiet" id="lvl-reset" aria-label="Clear calibration">Reset</button>
     </div>
@@ -23,20 +25,6 @@ import FoldHint from './FoldHint.astro';
       <svg class="dial dial-y" id="dial-y" aria-hidden="true"></svg>
       <svg class="dial dial-x" id="dial-x" aria-hidden="true"></svg>
     </div>
-    <FoldHint label="Out over" />
-  </div>
-
-  <div class="fold-more lvl-more">
-    <div class="lvl-offset">
-      <div class="offset-head">
-        <span class="caps">Out over</span>
-        <button class="chip" id="lvl-prec" aria-label="Offset precision">
-          <span class="chip-text">1/64</span>
-          <Icon name="chevron" />
-        </button>
-      </div>
-      <svg id="chart" aria-label="How far out of level a line gets over distance"></svg>
-    </div>
   </div>
 
   <div class="lvl-gate" id="lvl-gate" hidden>
@@ -50,8 +38,7 @@ import FoldHint from './FoldHint.astro';
     GravityFilter, detectMode, read, calibrate, offsetAt, noCalibration, screenQuarter,
     type Calibration, type LevelMode, type Reading, type Vec3,
   } from '../lib/level';
-  import { haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, precisionLabel } from '../lib/ui';
-  import { toFraction, fractionText } from '../lib/units';
+  import { haptic, load, save, inchHTML } from '../lib/ui';
   import { Odometer } from '../lib/odometer';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -64,10 +51,9 @@ import FoldHint from './FoldHint.astro';
   const gate = $('lvl-gate');
   const gateText = $('lvl-gate-text');
   const enableBtn = $<HTMLButtonElement>('lvl-enable');
-  const precChip = $('lvl-prec');
+  const overEl = $('lvl-over');
 
   let cal: Calibration = { ...noCalibration(), ...load<Partial<Calibration>>('levelCal', {}) };
-  let precision = loadPrecision('levelPrec', 64);
 
   function el(name: string, attrs: Record<string, string | number>, parent: Element, text?: string) {
     const n = document.createElementNS(SVG, name);
@@ -158,149 +144,6 @@ import FoldHint from './FoldHint.astro';
     turn += delta;
     quarter = q;
     screen.style.setProperty('--turn', `${turn}deg`);
-  }
-
-  /* ---------- Out over chart ----------
-     A view of the line the phone sits on, drawn along the phone's long side.
-     On an edge it's seen from the side: the true plumb/level line runs down the
-     middle and the real line drifts off it, with a bar at 1′, 2′, 4′ and 8′.
-     Lying flat it's seen from above: the line points to the low side. The
-     offset scale is fixed and linear (±2″), so nothing rescales or bends;
-     anything past it runs off the edge, and the values still read true. */
-
-  const chart = $('chart') as unknown as SVGSVGElement;
-  const DISTS: [number, string][] = [[12, '1′'], [24, '2′'], [48, '4′'], [96, '8′']];
-  const CAP = 2; // inches either side of the middle
-  let W = 340;
-  let H = 480;
-  const Y0 = 40;
-  const y1 = () => H - 40; // room for a value label turned on its side
-  const px0 = 44; // left column: distances
-  const px1 = () => W - 84; // right column: values
-  const cx = () => (px0 + px1()) / 2;
-  const half = () => (px1() - px0) / 2;
-  const cy = () => (Y0 + y1()) / 2;
-  const yAt = (inches: number) => Y0 + (inches / 96) * (y1() - Y0);
-  const sx = (offset: number) => (Math.max(-1.08, Math.min(1.08, offset / CAP)) * half());
-
-  const axisG = el('g', {}, chart);
-  const clip = el('clipPath', { id: 'chart-clip' }, chart);
-  const clipRect = el('rect', {}, clip);
-  const plot = el('g', { 'clip-path': 'url(#chart-clip)' }, chart);
-  const sideG = el('g', {}, plot);
-  const topG = el('g', {}, plot);
-  const line = el('line', { class: 'slope' }, plot);
-  const marks = el('g', {}, plot);
-  const bars = DISTS.map(([d]) => ({
-    d,
-    bar: el('line', { class: 'bar' }, marks),
-    dot: el('circle', { class: 'bar-dot', r: 2.5 }, marks),
-    label: el('text', { class: 'bar-val fr' }, chart),
-    steps: null as number | null,
-  }));
-
-  function drawAxis() {
-    axisG.replaceChildren();
-    sideG.replaceChildren();
-    topG.replaceChildren();
-    const x = cx();
-    clipRect.setAttribute('x', String(px0 - 4));
-    clipRect.setAttribute('y', String(Y0 - 2));
-    clipRect.setAttribute('width', String(px1() - px0 + 8));
-    clipRect.setAttribute('height', String(y1() - Y0 + 4));
-
-    // Offset scale along the top, both ways from the middle (no negatives: it's a distance off).
-    el('line', { x1: px0, y1: Y0, x2: px1(), y2: Y0, class: 'base' }, axisG);
-    for (let v = -CAP; v <= CAP; v += 0.5) {
-      const labeled = v !== 0 && Number.isInteger(v);
-      el('line', { x1: x + sx(v), y1: Y0, x2: x + sx(v), y2: Y0 - (v === 0 || labeled ? 8 : 5), class: 'tk' }, axisG);
-      if (labeled) el('text', { x: x + sx(v), y: Y0 - 18, class: 'tl' }, axisG, `${Math.abs(v)}″`);
-    }
-    // Distance and value columns.
-    for (const b of bars) {
-      el('text', { x: px0 / 2, y: yAt(b.d), class: 'dist-l' }, axisG, DISTS.find(([d]) => d === b.d)![1]);
-      b.label.setAttribute('x', String((px1() + W) / 2));
-      b.label.setAttribute('y', String(yAt(b.d)));
-    }
-
-    // Side view: the true line down the middle, marked every foot.
-    el('line', { x1: x, y1: Y0, x2: x, y2: y1(), class: 'axis' }, sideG);
-    for (let f = 1; f <= 8; f++) {
-      const len = [1, 2, 4, 8].includes(f) ? 6 : 3;
-      el('line', { x1: x - len, y1: yAt(f * 12), x2: x + len, y2: yAt(f * 12), class: 'tk' }, sideG);
-    }
-    // Top view: crosshair and rings at 1″ and 2″ around the phone.
-    el('line', { x1: px0, y1: cy(), x2: px1(), y2: cy(), class: 'base' }, topG);
-    el('line', { x1: x, y1: cy() - half(), x2: x, y2: cy() + half(), class: 'base' }, topG);
-    for (const v of [1, 2]) el('circle', { cx: x, cy: cy(), r: sx(v), class: 'ring' }, topG);
-    el('circle', { cx: x, cy: cy(), r: 3, class: 'center' }, topG);
-  }
-
-  function sizeChart() {
-    W = chart.clientWidth || 340;
-    H = chart.clientHeight || 480;
-    chart.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    drawAxis();
-  }
-
-  const tan = (deg: number) => Math.tan((deg * Math.PI) / 180);
-
-  /**
-   * Lay the chart out; called every frame with the slow reading. Edge: `a` is the
-   * deviation. Flat: `a`/`b` are the tilts across/along the screen.
-   */
-  function layoutChart(flat: boolean, a: number, b: number) {
-    sideG.toggleAttribute('hidden', flat);
-    topG.toggleAttribute('hidden', !flat);
-    const x = cx();
-    if (!flat) {
-      // Tilting the phone counter-clockwise swings the far end to screen-right.
-      const t = tan(a);
-      line.setAttribute('x1', String(x));
-      line.setAttribute('y1', String(Y0));
-      line.setAttribute('x2', String(x + sx(t * 96)));
-      line.setAttribute('y2', String(y1()));
-      for (const m of bars) {
-        const bx = x + sx(t * m.d);
-        const y = yAt(m.d);
-        for (const [k, v] of [['x1', x], ['y1', y], ['x2', bx], ['y2', y]] as const) m.bar.setAttribute(k, String(v));
-        m.dot.setAttribute('cx', String(bx));
-        m.dot.setAttribute('cy', String(y));
-      }
-      return;
-    }
-    // Seen from above, the drop points downhill: away from the raised side (screen y points down).
-    const ux = -tan(a);
-    const uy = tan(b);
-    const y = cy();
-    line.setAttribute('x1', String(x));
-    line.setAttribute('y1', String(y));
-    line.setAttribute('x2', String(x + sx(ux * 96)));
-    line.setAttribute('y2', String(y + sx(uy * 96)));
-    for (const m of bars) {
-      m.bar.setAttribute('x1', String(x));
-      m.bar.setAttribute('x2', String(x));
-      m.bar.setAttribute('y1', String(y));
-      m.bar.setAttribute('y2', String(y));
-      m.dot.setAttribute('cx', String(x + sx(ux * m.d)));
-      m.dot.setAttribute('cy', String(y + sx(uy * m.d)));
-    }
-  }
-
-  /** Label text, refreshed on a slow clock with hysteresis. */
-  function labelChart(dev: number, force = false) {
-    for (const b of bars) {
-      const off = Math.abs(offsetAt(dev, b.d));
-      const exact = off * precision;
-      if (!force && b.steps !== null && Math.abs(exact - b.steps) < 0.65) continue;
-      const steps = Math.round(exact);
-      b.steps = steps;
-      const shownInches = steps / precision;
-      const diff = off - shownInches;
-      const dir = steps === 0 || Math.abs(diff) * precision < 0.1 ? 0 : diff > 0 ? 1 : -1;
-      b.label.textContent = fractionText(toFraction(shownInches, precision)) + '″';
-      if (dir) el('tspan', { class: dir > 0 ? 'rd-up' : 'rd-down', dy: -5 }, b.label, dir > 0 ? '+' : '−');
-    }
   }
 
   /* ---------- Sensor ---------- */
@@ -403,28 +246,28 @@ import FoldHint from './FoldHint.astro';
   let lastText = 0;
   let lastShownAt = 0;
 
-  // "Out over" runs on a slower clock: a heavier filter for the drawing, and
-  // labels that show the average over each second.
-  const SLOW_TAU = 0.6;
-  const SLACK = 0.02; // degrees the drawing ignores, like play in a joint
-  let slow: { a: number; b: number } | null = null;
-  let drawn = { a: 0, b: 0 };
-  let slowRef = '';
-  let labelDev = 0;
-  const win = { sum: 0, n: 0, at: 0 };
-
-  /** Follows `target` only once it's more than SLACK away, so resting flicker never shows. */
-  const slack = (held: number, target: number) =>
-    Math.abs(target - held) <= SLACK ? held : target - Math.sign(target - held) * SLACK;
-
   const deg = (v: number) => `${Math.abs(v).toFixed(2)}°`;
 
   // The long side of the phone is the reference: upright it checks plumb,
   // sideways it checks level. The number is how far off, 0 when true.
   const ref = (r: Reading) => (r.mode === 'flat' ? 'flat' : r.angle > 45 ? 'level' : 'plumb');
 
+  /* Out over 4′, to the nearest 1/32″. It only moves to a new step once the reading
+     is well past the halfway mark, so it doesn't flick between two neighbors. */
+  const OVER_AT = 48;
+  const OVER_DEN = 32;
+  let overSteps = -1;
+
+  function renderOver(dev: number) {
+    const exact = Math.abs(offsetAt(dev, OVER_AT)) * OVER_DEN;
+    if (overSteps >= 0 && Math.abs(exact - overSteps) < 0.65) return;
+    overSteps = Math.round(exact);
+    overEl.innerHTML = inchHTML(exact / OVER_DEN, OVER_DEN);
+  }
+
   function renderText(r: Reading) {
     odometer.set(Math.abs(r.deviation));
+    renderOver(r.deviation);
     modeEl.textContent = ref(r).replace(/^./, (c) => c.toUpperCase());
     devEl.textContent = r.mode === 'flat'
       ? `${deg(r.tiltX)} × ${deg(r.tiltY)}`
@@ -453,36 +296,6 @@ import FoldHint from './FoldHint.astro';
     }
   }
 
-  function updateOutOver(r: Reading, ref: string, dt: number, now: number) {
-    const flat = r.mode === 'flat';
-    const a = flat ? r.tiltX : r.deviation;
-    const b = flat ? r.tiltY : 0;
-    // Snap only when switching level ↔ plumb ↔ flat; any other movement glides.
-    if (!slow || ref !== slowRef) {
-      slow = { a, b };
-      drawn = { a, b };
-      slowRef = ref;
-      win.sum = 0;
-      win.n = 0;
-    } else {
-      const k = 1 - Math.exp(-dt / SLOW_TAU);
-      slow.a += (a - slow.a) * k;
-      slow.b += (b - slow.b) * k;
-      drawn = { a: slack(drawn.a, slow.a), b: slack(drawn.b, slow.b) };
-    }
-    layoutChart(flat, drawn.a, drawn.b);
-
-    win.sum += r.deviation;
-    win.n++;
-    if (now - win.at >= 1000) {
-      labelDev = win.sum / win.n;
-      labelChart(labelDev, bars[0].steps === null);
-      win.at = now;
-      win.sum = 0;
-      win.n = 0;
-    }
-  }
-
   function renderFrame(now: number) {
     frame = requestAnimationFrame(renderFrame);
     if (!raw) return;
@@ -505,8 +318,6 @@ import FoldHint from './FoldHint.astro';
     setDial(dialX, x, dt);
     setDial(dialY, y, dt);
 
-    updateOutOver(r, ref(r), dt, now);
-
     const isLevel = Math.abs(r.deviation) < 0.05;
     if (isLevel !== wasLevel) {
       screen.classList.toggle('is-level', isLevel);
@@ -522,7 +333,6 @@ import FoldHint from './FoldHint.astro';
     active = on;
     if (on) {
       sizeDials();
-      sizeChart();
       start();
       keepAwake(true);
       lastSample = 0;
@@ -549,29 +359,9 @@ import FoldHint from './FoldHint.astro';
     save('levelCal', cal);
   });
 
-  function renderPrec() {
-    precChip.querySelector('.chip-text')!.innerHTML = prettyHTML(precisionLabel(precision));
-  }
-  precChip.addEventListener('click', () => {
-    haptic();
-    openPrecisionSheet(precision, (p) => {
-      precision = p;
-      save('levelPrec', p);
-      renderPrec();
-      labelChart(labelDev, true);
-    });
-  });
-  renderPrec();
   odometer.set(0);
   sizeDials();
-  sizeChart();
-  layoutChart(false, 0, 0);
-  labelChart(0, true);
-
-  window.addEventListener('resize', () => {
-    sizeDials();
-    sizeChart();
-  });
+  window.addEventListener('resize', sizeDials);
   const isLevelTab = () => document.querySelector<HTMLElement>('.app')?.dataset.tab === 'level';
   document.addEventListener('tab:change', () => setActive(isLevelTab()));
   document.addEventListener('visibilitychange', () => {

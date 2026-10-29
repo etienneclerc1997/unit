@@ -45,7 +45,7 @@ import FoldHint from './FoldHint.astro';
   import { lex, evaluate, press, series, emptyState, type CalcState, type SeriesMode, type Item } from '../lib/calc';
   import {
     haptic, load, save, loadPrecision, openPrecisionSheet, prettyHTML, escape, inchHTML, precisionLabel, onLongPress,
-    onTap, updateDenoms, onDenom,
+    updateDenoms, onDenom,
   } from '../lib/ui';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -233,8 +233,9 @@ import FoldHint from './FoldHint.astro';
 
   // The keypad is shared with Convert.
   const onCalc = () => document.querySelector('.app')?.getAttribute('data-tab') === 'calc';
-  onTap(document.querySelector('.keypad')!, '.key', (k) => {
-    if (!onCalc()) return;
+  document.querySelector('.keypad')!.addEventListener('click', (e) => {
+    const k = (e.target as HTMLElement).closest<HTMLButtonElement>('.key');
+    if (!k || !onCalc()) return;
     haptic();
     key(k.dataset.k!);
   });
