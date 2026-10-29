@@ -1130,11 +1130,59 @@ button:focus-visible {
 }
 
 .lvl-over-val {
+  display: inline-flex;
+  align-items: baseline;
   font-size: 22px;
   font-weight: 400;
   letter-spacing: -0.3px;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+}
+
+/* Built from fixed two-digit slots (numerator up, denominator down) rather than
+   a font fraction, so it keeps one width whatever the value. */
+.ov-frac {
+  margin-left: 0.2em;
+  font-size: 0.62em;
+  letter-spacing: 0;
+}
+
+.ov-num {
+  position: relative;
+  top: -0.5em;
+}
+
+.ov-slash {
+  margin: 0 0.04em;
+}
+
+.ov-den {
+  position: relative;
+  top: 0.1em;
+}
+
+.ov-unit {
+  margin-left: 0.06em;
+}
+
+.ov-rd {
+  position: relative;
+  top: -0.5em;
+  width: 0.7em;
+  margin-left: 0.1em;
+  font-size: 0.62em;
+  font-weight: 600;
+  visibility: hidden;
+}
+
+.ov-rd.up {
+  visibility: visible;
+  color: var(--up);
+}
+
+.ov-rd.down {
+  visibility: visible;
+  color: var(--down);
 }
 
 .lvl-over-dist {

@@ -5,7 +5,7 @@
     <div class="lvl-bar">
       <!-- How far the line drifts over a 4′ level, the length you'd check it with. -->
       <div class="lvl-over" aria-label="Out over 4 feet">
-        <span class="lvl-over-val" id="lvl-over">0″</span>
+        <span class="lvl-over-val" id="lvl-over"></span>
         <span class="lvl-over-dist">over 4′</span>
       </div>
       <button class="pill-btn small" id="lvl-zero" aria-label="Calibrate: make this position read zero">Zero</button>
@@ -38,7 +38,8 @@
     GravityFilter, detectMode, read, calibrate, offsetAt, noCalibration, screenQuarter,
     type Calibration, type LevelMode, type Reading, type Vec3,
   } from '../lib/level';
-  import { haptic, load, save, inchHTML } from '../lib/ui';
+  import { haptic, load, save } from '../lib/ui';
+  import { toFraction } from '../lib/units';
   import { Odometer } from '../lib/odometer';
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -258,11 +259,27 @@
   const OVER_DEN = 32;
   let overSteps = -1;
 
+  /** Two digits, unlit leading zeros, like the degrees: the width never changes. */
+  const digits = (n: number, lit: boolean) => {
+    const s = String(n).padStart(2, '0');
+    const lead = lit ? s.match(/^0*/)![0].slice(0, n ? undefined : 1) : s;
+    return `<span class="odo-lead">${lead}</span>${s.slice(lead.length)}`;
+  };
+
   function renderOver(dev: number) {
     const exact = Math.abs(offsetAt(dev, OVER_AT)) * OVER_DEN;
     if (overSteps >= 0 && Math.abs(exact - overSteps) < 0.65) return;
     overSteps = Math.round(exact);
-    overEl.innerHTML = inchHTML(exact / OVER_DEN, OVER_DEN);
+    const f = toFraction(exact / OVER_DEN, OVER_DEN);
+    const frac = f.num > 0;
+    const mark = f.dir > 0 ? '+' : f.dir < 0 ? '−' : '';
+    overEl.innerHTML =
+      `<span class="ov-whole">${digits(Math.min(f.whole, 99), f.whole > 0 || !frac)}</span>` +
+      `<span class="ov-frac"><span class="ov-num">${digits(f.num, frac)}</span>` +
+      `<span class="ov-slash${frac ? '' : ' odo-lead'}">/</span>` +
+      `<span class="ov-den">${digits(frac ? f.den : 0, frac)}</span></span>` +
+      `<span class="ov-unit">″</span>` +
+      `<span class="ov-rd${mark === '+' ? ' up' : mark ? ' down' : ''}">${mark || '+'}</span>`;
   }
 
   function renderText(r: Reading) {
@@ -360,6 +377,7 @@
   });
 
   odometer.set(0);
+  renderOver(0);
   sizeDials();
   window.addEventListener('resize', sizeDials);
   const isLevelTab = () => document.querySelector<HTMLElement>('.app')?.dataset.tab === 'level';
